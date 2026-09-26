@@ -251,7 +251,8 @@ with TestClient(app) as c:
     s = r["settings"]
     check("settings: valid changes kept, invalid ones ignored", s["turn"] == "patient" and s["wake_sensitivity"] == "normal"
           and s["speed"] == 1.2 and s["eleven_model"] == "eleven_flash_v2_5", str(s))
-    check("the listener follows the pause setting", wake.wake.pause_s == 1.2)
+    check("the listener follows the pause setting (patient: 1.3 s, so a pause mid-sentence doesn't cut you off)",
+          wake.wake.pause_s == 1.3)
     c.post("/v1/settings", headers=H, json={"changes": {"turn": "normal"}})
     from plag_core.elevenlabs import eleven as el
     if not el.configured():
@@ -424,11 +425,12 @@ with TestClient(app) as c:
     from plag_core import agent as agent_p  # noqa: E402
     from plag_core import edgevoice as edgevoice_mod  # noqa: E402
     sp = " ".join(agent_p.system_prompt("auto").split())
-    check('PLAG calls you "sir", never "bro"', 'Always call the user "sir" (never "bro"' in sp and "Haan bro" not in sp)
+    check('PLAG calls you "sir", never "bro"', 'Always address the user as "sir" (never "bro"' in sp and "Haan bro" not in sp)
     check("it answers in the language you used (English -> English, Hindi -> Hindi)",
           "SAME language as the user's latest message" in sp and "English -> reply only in English" in sp)
-    check("good news gets real joy ('Wow sir, that's amazing!', mood excited)", "react with real joy" in sp
-          and "Wow sir, that's amazing!" in sp and 'mood "excited"' in sp)
+    check("professional, not casual: measured acknowledgement, no 'Wow', calm by default",
+          "professional executive assistant" in sp and "Congratulations, sir. Well done." in sp and "Wow" not in sp
+          and "calm (default, almost always)" in sp)
     check("the camera answers call you sir too", 'Call the user "sir"' in agent_p.vision_prompt("mixed"))
     joy, sad = sarvam._body("Wow sir, amazing!", "excited"), sarvam._body("Oh no sir", "sorry")
     check("Sarvam: joy is livelier (faster, more expressive), sad is softer", joy["temperature"] > 0.6 > sad["temperature"]
@@ -448,8 +450,8 @@ with TestClient(app) as c:
         _edge_tts.Communicate, edgevoice.usable, edgevoice_mod.CACHE = _FakeCommunicate, (lambda: True), Path(tempfile.mkdtemp())
         import asyncio as _a_e  # noqa: E402
         _a_e.run(edgevoice.speak("Wow sir, that's amazing!", "excited"))
-        check("Edge: you spoke English, the English voice answers, brighter for joy",
-              calls[-1][1] == "en-IN-PrabhatNeural" and calls[-1][3] == "+9Hz" and calls[-1][2].startswith("+"), str(calls[-1:]))
+        check("Edge: you spoke English, the English voice answers, only slightly brighter (steady, professional)",
+              calls[-1][1] == "en-IN-PrabhatNeural" and calls[-1][3] == "+2Hz", str(calls[-1:]))
         _a_e.run(edgevoice.speak("Arre waah sir, kya baat hai!", "excited"))
         check("Edge: Hindi is spoken by the Hindi voice", calls[-1][1] == "hi-IN-MadhurNeural" and "क्या" in calls[-1][0], str(calls[-1:]))
     finally:
