@@ -5,7 +5,9 @@ import { call, CoreError, stream } from './core';
 import { agentLive, onAgentResult, startAgent, stopAgent } from './agent';
 import { LiveTranscriber } from './listen';
 import { localVoice, speakLocal, stopLocal } from './tts';
-import { useStore, type FollowUp, type Lang, type Memory, type Reminder, type TurnResult, type WakeStatus } from '../state/store';
+import {
+  useStore, type FollowUp, type Lang, type Memory, type Reminder, type RouteStep, type RouteView, type TurnResult, type WakeStatus,
+} from '../state/store';
 
 const mic = new MicRecorder();
 const speaker = new Speaker();
@@ -466,6 +468,10 @@ async function handleResult(res: TurnResult, ctrl: AbortController, spoken = fal
     await lookThroughCamera(client.question ?? '', ctrl);
     return;
   }
+  if (client?.type === 'screen_look') {
+    await lookAtScreen(client.question ?? '', ctrl);
+    return;
+  }
   if (client?.type === 'camera_imagine') {
     // "gen an image of this": say "let me look" while the frame is taken and the picture is drawn
     await imagineThroughCamera(client.style ?? '', ctrl, say(res.reply, ctrl, 'calm'));
@@ -473,6 +479,7 @@ async function handleResult(res: TurnResult, ctrl: AbortController, spoken = fal
   }
   if (client?.type === 'image' && client.id) await showImage(client.id, client.prompt ?? '');
   if (client?.type === 'draft_saved' && client.id) markSaved(client.id); // "save": the card shows it's kept
+  if (client?.type === 'route' && client.steps) startNav(client as unknown as RouteClient);
   await ackPlaying?.catch(() => undefined); // let "On it." finish before the result
   if (client?.type === 'ui' && client.command) {
     if (client.command === 'halt') {
@@ -531,6 +538,7 @@ async function applyUi(command: string): Promise<void> {
     case 'lang_auto': s.setLang('auto'); break;
     case 'camera_on': await openCamera(); break;
     case 'camera_off': camera.stop(); break;
+    case 'stop_nav': await stopNav(false); break;
     case 'wake_off': await setWake(false); break;
   }
 }
@@ -610,6 +618,37 @@ export async function lookThroughCamera(question = '', parent?: AbortController)
     if (ctrl.signal.aborted) return;
     useStore.getState().completeTurn(res);
     await say(res.reply, ctrl, 'curious');
+  } catch (e) {
+    if (isAbort(e)) return;
+    useStore.getState().failTurn(e instanceof CoreError ? explain(e, s.lang) : String(e));
+    earcon('error');
+  } finally {
+    if (!parent && inflight === ctrl) inflight = null;
+    useStore.getState().settle();
+  }
+}
+
+/** "Look at my screen" / "screen dekho": one screenshot (PLAG's window fades out for it), then the AI reads it and
+ * answers: what's going on, what a message or error says (translated, in any language), what to do next. */
+export async function lookAtScreen(question = '', parent?: AbortController): Promise<void> {
+  const s = useStore.getState();
+  if (s.halted) return;
+  const image = await window.plag?.captureScreen().catch(() => null);
+  if (!image) {
+    s.setError(text(s.lang, "I couldn't take a screenshot of your screen.", 'स्क्रीन का स्क्रीनशॉट नहीं ले पाया।'));
+    return;
+  }
+  const ctrl = parent ?? new AbortController();
+  if (!parent) {
+    inflight?.abort();
+    inflight = ctrl;
+  }
+  s.beginTurn(null, 'camera');
+  try {
+    const res = await call<TurnResult>('/v1/vision', { json: { image, lang: s.lang, question, source: 'screen' }, signal: ctrl.signal });
+    if (ctrl.signal.aborted) return;
+    useStore.getState().completeTurn(res);
+    await say(res.reply, ctrl, res.mood ?? 'calm');
   } catch (e) {
     if (isAbort(e)) return;
     useStore.getState().failTurn(e instanceof CoreError ? explain(e, s.lang) : String(e));
@@ -844,7 +883,9 @@ export interface ElevenStatus {
 export type SettingsReply = { settings: Settings; eleven: ElevenStatus; live?: Live };
 
 // how long a pause ends your turn: with streamed hearing the words are ready ~0.3 s later, so PLAG answers sooner
-const SILENCE_MS = { fast: 450, normal: 650, patient: 1000 };
+// 2026-09-26: at 0.45 s ("fast") a short pause mid-sentence ended the turn ("Send a message" / "Chachu bangalore" came
+// as two commands). Patient waits 1.3 s, so you can think between words.
+const SILENCE_MS = { fast: 700, normal: 1000, patient: 1300 };
 
 function applySettings(r: SettingsReply): SettingsReply {
   const s = r.settings;
@@ -901,6 +942,80 @@ export async function openDoc(id: string): Promise<void> {
 
 export async function revealDoc(id: string): Promise<void> {
   await call(`/v1/docs/${encodeURIComponent(id)}/reveal`, { method: 'POST' }).catch(() => undefined);
+}
+
+// ---------------------------------------------------------------- directions (live map + turn call-outs)
+
+type RouteClient = Omit<RouteView, 'here' | 'next' | 'toNext'>;
+let navTimer = 0;
+let navSaid = { step: -1, near: -1, arrived: false }; // what's been called out, so nothing is said twice
+
+function metres(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const r = Math.PI / 180;
+  const dla = (b.lat - a.lat) * r;
+  const dln = (b.lng - a.lng) * r;
+  const h = Math.sin(dla / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dln / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+/** The next turn from where you are: the one after the nearest turn point you've reached (within 40 m). */
+function nextStep(steps: RouteStep[], here: { lat: number; lng: number }): [number, number] {
+  if (!steps.length) return [0, 0];
+  let nearest = 0;
+  steps.forEach((s, i) => { if (metres(here, s) < metres(here, steps[nearest])) nearest = i; });
+  const i = metres(here, steps[nearest]) < 40 ? Math.min(nearest + 1, steps.length - 1) : nearest;
+  return [i, metres(here, steps[i])];
+}
+
+const say2 = (lang: string, en: string, hi: string) => (lang === 'en' ? en : hi);
+const dist = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1).replace(/\.0$/, '')} km` : `${Math.max(50, Math.round(m / 50) * 50)} metres`);
+
+function startNav(r: RouteClient): void {
+  window.clearInterval(navTimer);
+  const here = r.origin;
+  const [next, toNext] = nextStep(r.steps, here);
+  navSaid = { step: next, near: -1, arrived: false };
+  useStore.getState().setRoute({ ...r, here, next, toNext });
+  navTimer = window.setInterval(() => void followNav(), 15000);
+}
+
+/** Every 15 s while a trip is on: where you are now, the next turn, and a call-out when it's close. */
+async function followNav(): Promise<void> {
+  const r = useStore.getState().route;
+  if (!r) { window.clearInterval(navTimer); return; }
+  let here: { lat: number; lng: number; accuracy_m?: number };
+  try {
+    here = await call<{ lat: number; lng: number; accuracy_m: number }>('/v1/location/now');
+  } catch {
+    return; // no fix this time: try again at the next tick
+  }
+  const [next, toNext] = nextStep(r.steps, here);
+  useStore.getState().setRoute({ ...r, here, next, toNext });
+  const s = useStore.getState();
+  if (s.speaking || s.listening || s.pending) return; // never talk over you or a reply
+  const step = r.steps[next];
+  if (!navSaid.arrived && metres(here, r.dest) < 60) {
+    navSaid.arrived = true;
+    window.clearInterval(navTimer);
+    await say(say2(r.lang, `You have arrived at ${r.dest.name}, sir.`, `Sir, aap ${r.dest.name} pahunch gaye.`), undefined, 'cheerful', false);
+    return;
+  }
+  if (!step) return;
+  if (toNext < 150 && navSaid.near !== next) {
+    navSaid = { ...navSaid, step: next, near: next };
+    await say(say2(r.lang, `Now, ${step.text.toLowerCase()}.`, `Ab, ${step.text}.`), undefined, 'calm', false);
+  } else if (navSaid.step !== next) {
+    navSaid = { ...navSaid, step: next };
+    await say(say2(r.lang, `In ${dist(toNext)}, ${step.text.toLowerCase()}.`, `${dist(toNext)} mein, ${step.text}.`), undefined, 'calm', false);
+  }
+}
+
+/** End the trip: the map closes and PLAG stops asking where you are. */
+export async function stopNav(announce = true): Promise<void> {
+  window.clearInterval(navTimer);
+  navTimer = 0;
+  useStore.getState().setRoute(null);
+  if (announce) await say(text(useStore.getState().lang, 'Navigation ended, sir.', 'नेविगेशन बंद, सर।'), undefined, 'calm', false);
 }
 
 /** The card's viewer shows it as saved (after the Save button, or "save" said to PLAG). */

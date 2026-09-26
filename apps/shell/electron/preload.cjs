@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('plag', {
   onSetWake: (fn) => listen('plag:set-wake', fn),
   onVisible: (fn) => listen('plag:visible', fn),
   clearCache: () => ipcRenderer.invoke('plag:clear-cache'),
+  captureScreen: () => ipcRenderer.invoke('plag:capture-screen'),
   reveal: () => ipcRenderer.send('plag:reveal'),
   notify: (title, body) => ipcRenderer.send('plag:notify', String(title).slice(0, 64), String(body).slice(0, 240)),
   pickGoogleClient: () => ipcRenderer.invoke('plag:pick-google-client'),

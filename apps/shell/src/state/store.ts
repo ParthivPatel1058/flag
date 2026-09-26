@@ -74,6 +74,7 @@ export interface TurnResult {
     type: string; command?: string; question?: string; style?: string; id?: string; prompt?: string;
     hours?: number[]; variable?: string; label?: string; // a weather simulation's maps
     title?: string; kind?: string; summary?: string; words?: number; sources?: number; // a PDF PLAG wrote
+    steps?: RouteStep[]; // directions (the rest of RouteView comes with them)
   } | null;
   vision?: { label: string; confidence: string } | null;
   sources?: { title: string; url: string; site: string }[]; // Wikipedia and news links behind an answer
@@ -119,6 +120,24 @@ export interface Model3D {
   prompt: string;
   url: string; // blob: URL of the .glb (a draft in PLAG's memory until you save it)
   saved?: boolean;
+}
+export type Turn = 'depart' | 'left' | 'right' | 'slight-left' | 'slight-right' | 'sharp-left' | 'sharp-right' | 'uturn'
+  | 'roundabout' | 'straight' | 'arrive';
+export interface RouteStep { text: string; turn: Turn; distance_m: number; lat: number; lng: number }
+/** Directions on the live map: the route from the core, and where you are now (updated while you travel). */
+export interface RouteView {
+  dest: { name: string; address: string; lat: number; lng: number };
+  origin: { lat: number; lng: number };
+  distance_m: number;
+  duration_s: number;
+  steps: RouteStep[];
+  path: [number, number][];
+  by: string;
+  traffic: boolean;
+  lang: string;
+  here: { lat: number; lng: number; accuracy_m?: number };
+  next: number; // index of the next turn
+  toNext: number; // metres to it
 }
 export interface WeatherSim {
   id: string;
@@ -229,6 +248,8 @@ export interface PlagState {
   setImage(i: GenImage | null): void;
   setModel3d(m: Model3D | null): void;
   setSim(w: WeatherSim | null): void;
+  route: RouteView | null;
+  setRoute(r: RouteView | null): void;
   setVisible(v: boolean): void;
   setDoc(d: Doc | null): void;
   setAlwaysListen(on: boolean): void;
@@ -284,6 +305,8 @@ export const useStore = create<PlagState>()((set, get) => ({
   image: null,
   model3d: null,
   sim: null,
+  route: null,
+  setRoute: (route) => set({ route }),
   followUp: null,
   visible: true,
   doc: null,

@@ -8,6 +8,7 @@ import {
 } from '../lib/voice';
 import { selectStatus, useStore, type Status } from '../state/store';
 import HeroOrb from './HeroOrb';
+import NavView from './NavView';
 import {
   AttachIcon, CameraIcon, CloseIcon, DocIcon, FolderIcon, KeyboardIcon, ListenIcon, MicIcon, OpenIcon, PauseIcon, PlayIcon,
   SendIcon, StopSquare, WhatsAppIcon,
@@ -368,7 +369,7 @@ export default function Stage() {
   const notice = useStore((s) => s.notice);
   const woke = useStore((s) => s.woke);
   const cameraOn = useStore((s) => s.cameraOn);
-  const hasImage = useStore((s) => !!(s.image || s.model3d || s.sim || s.doc));
+  const hasImage = useStore((s) => !!(s.image || s.model3d || s.sim || s.doc || s.route));
   const asking = useStore((s) => !!s.approval);
   const followUp = useStore((s) => s.followUp);
   const always = useStore((s) => s.alwaysListen);
@@ -411,6 +412,7 @@ export default function Stage() {
         <ModelView />
         <SimView />
         <DocView />
+        <NavView />
         <HeroOrb />
       </div>
       <div className="speech" aria-live="polite">

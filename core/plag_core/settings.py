@@ -46,7 +46,7 @@ CHOICES = {"eleven_model": {"eleven_flash_v2_5", "eleven_v3_conversational", "el
            "turn": {"fast", "normal", "patient"}, "wake_sensitivity": {"low", "normal", "high"},
            "follow_up": {"off", "questions", "always"}, "voice_engine": set(VOICE_ENGINES),
            "sarvam_speaker": set(SARVAM_SPEAKERS), "edge_voice": set(EDGE_VOICES)}
-PAUSE_S = {"fast": 0.55, "normal": 0.8, "patient": 1.2}  # silence that ends a phrase
+PAUSE_S = {"fast": 0.7, "normal": 1.0, "patient": 1.3}  # silence that ends a phrase
 _lock = threading.Lock()
 _cache: dict | None = None
 

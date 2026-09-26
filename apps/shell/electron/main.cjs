@@ -1,6 +1,6 @@
 // PLAG desktop shell: owns the window, the tray icon, global hotkeys, and the plag-core child process.
 // Closing the window hides PLAG to the tray: the wake word, voice and reminders keep working. Quit from the tray.
-const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, desktopCapturer, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -235,6 +235,26 @@ ipcMain.handle('plag:clear-cache', async (event) => {
   await ses.clearCodeCaches({});
   await ses.clearStorageData({ storages: ['shadercache', 'cachestorage', 'serviceworkers'] });
   return true;
+});
+
+// "Look at my screen": one screenshot of the screen PLAG's window is on, only when you ask (never in the background).
+// PLAG's own window fades out for a moment so the screenshot shows your work, not the dashboard. JPEG, at most 1600 px.
+ipcMain.handle('plag:capture-screen', async (event) => {
+  if (!win || !isTrusted(event.senderFrame?.url || '')) return null;
+  const display = screen.getDisplayMatching(win.getBounds());
+  const scale = Math.min(1, 1600 / Math.max(display.size.width, display.size.height));
+  const size = { width: Math.round(display.size.width * display.scaleFactor * scale),
+    height: Math.round(display.size.height * display.scaleFactor * scale) };
+  const wasVisible = win.isVisible() && !win.isMinimized();
+  if (wasVisible) { win.setOpacity(0); await new Promise((r) => setTimeout(r, 180)); }
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
+    const src = sources.find((s) => s.display_id === String(display.id)) || sources[0];
+    if (!src || src.thumbnail.isEmpty()) return null;
+    return `data:image/jpeg;base64,${src.thumbnail.toJPEG(82).toString('base64')}`;
+  } finally {
+    if (wasVisible) win.setOpacity(1);
+  }
 });
 
 // Reminders: a notification from the tray icon (works for this unpackaged app, unlike Windows toasts).

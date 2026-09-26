@@ -9,7 +9,8 @@ export const endpoint = { silenceMs: 650 };
 
 const FRAME = 1024; // 64 ms at 16 kHz: an interruption is noticed within a few frames
 const PREROLL_FRAMES = 12; // ~0.77 s kept while PLAG talks: the words you said as you cut in aren't lost
-const BARGE_FRAMES = 3; // ~0.2 s of your voice over PLAG's stops it
+// ~0.4 s of your voice over PLAG's stops it (0.2 s let PLAG's own voice and room noise cut it off, 2026-09-26)
+const BARGE_FRAMES = 6;
 
 export class MicRecorder {
   private ctx?: AudioContext;
@@ -143,7 +144,7 @@ export class MicRecorder {
     const outMax = Math.max(...this.outRecent);
     if (outMax < 0.004) this.noise = Math.max(0.004, this.noise * 0.9 + rms * 0.1); // a pause: the room's own level
     const echo = this.leak * outMax;
-    const loud = rms > Math.max(0.025, this.noise * 4, echo * 2.5 + 0.012);
+    const loud = rms > Math.max(0.035, this.noise * 5, echo * 3.5 + 0.02);
     if (loud) this.voicedFrames += 1;
     else {
       this.voicedFrames = Math.max(0, this.voicedFrames - 1);

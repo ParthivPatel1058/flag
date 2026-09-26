@@ -69,6 +69,16 @@ _DOMAIN = re.compile(r"(?:https?://)?(?P<d>[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?P<p>/\S
 _CAMERA_LOOK = re.compile(
     r"(what is this|what's this|whats this|what am i holding|what do you see|identify this|what is in my hand"
     r"|ye kya hai|yeh kya hai|yah kya hai|ise pehchano|यह क्या है|ये क्या है|इसे पहचानो|क्या है ये)")
+# "look at my screen", "my screen dekho", "screen pe kya likha hai", "what does this error say", "read my screen",
+# "translate my screen", "kya karna hai isme": one screenshot, read by the AI (plain = no specific question)
+_SCREEN = r"(?:my\s+|the\s+|this\s+|meri\s+|mera\s+)?(?:screen|display|monitor|स्क्रीन)"
+_SCREEN_LOOK = re.compile(
+    rf"^(?:(?:jarvis|plag)[,\s]+)?(?P<plain>(?:please\s+)?(?:look at|check|see|read|scan|analy[sz]e|dekho|dekh lo|check karo|padho)\s+{_SCREEN}"
+    rf"|{_SCREEN}\s+(?:dekho|dekh lo|check karo|padho|dekhna|dekh)|what'?s on {_SCREEN}|what is on {_SCREEN}"
+    rf"|what do you see on {_SCREEN}|{_SCREEN}\s+pe\s+kya\s+(?:hai|chal raha hai))"
+    rf"|(?:.*\b(?:on|in)\s+{_SCREEN}.*|.*\b{_SCREEN}\s+(?:pe|par|mein|me)\b.*"
+    r"|what does (?:this|the|that) (?:error|message|popup|pop-up|warning|dialog) (?:say|mean)\??"
+    r"|translate (?:this|the|my) (?:screen|page|text)|any work to do\??|kya karna hai (?:isme|ismein|yahan)\??)$", re.I)
 _CAMERA_ON = re.compile(r"^((open|start|turn on|switch on)\s+(the\s+)?camera|camera\s+(on|kholo|chalu karo|on karo|start karo)"
                         r"|कैमरा\s+(खोलो|चालू करो|ऑन करो))$")
 _CAMERA_OFF = re.compile(r"^((close|stop|turn off|switch off)\s+(the\s+)?camera|camera\s+(off|band karo|band|off karo)"
@@ -236,6 +246,54 @@ _SAVE = re.compile(rf"^(?:please\s+)?(?:save|keep)(?:\s+(?P<w>it|this|that|them|
                    r"(?:\s+(?:please|now|for me))?"
                    rf"|(?:ise|isko|ye|yeh|use|usko)?\s*(?:(?P<w2>{_SAVE_WHAT})\s+(?:ko\s+)?)?save\s+(?:karo|kar do|kardo|kar lo|kar de|kijiye)",
                    re.I)
+# Directions: "take me to India Gate", "navigate to the airport", "how do I get to CP", "I want to go to Connaught
+# Place", "India Gate kaise jaun", "airport ka rasta batao", "mujhe office jana hai", "ghar le chalo", "take me home"
+_NAV = [
+    re.compile(r"^(?:please\s+)?(?:take me|navigate|directions|get me|drive me|guide me|show me the way|show me the route"
+               r"|route|how do i get|how can i get|how to go|how to get|i want to go|i wanna go|let'?s go|lets go"
+               r"|i need to go|i have to go)\s+to\s+(?P<p>.+?)(?:\s+please)?$", re.I),
+    re.compile(r"^(?:please\s+)?(?:take me|get me|drive me|navigate|let'?s go)\s+(?:back\s+)?(?P<p>home)(?:\s+please)?$", re.I),
+    re.compile(r"^(?:how far is|how long to|how much time to|how to reach|how do i reach|how long will it take to (?:go to|reach|get to))"
+               r"\s+(?P<p>.+?)\??$", re.I),
+    re.compile(r"^(?:mujhe\s+|hume\s+|humein\s+)?(?P<p>.+?)\s+(?:kaise\s+(?:jaun|jaaun|jaye|jayen|jaana hai|jana hai|jau|pahunchu|pahuchu)"
+               r"|ka\s+rasta\s+(?:batao|bata do|dikhao|dikha do|bataiye)|ka\s+route\s+(?:batao|dikhao)|le\s+chalo"
+               r"|jana\s+hai|jaana\s+hai|kitni\s+door\s+hai|kitna\s+door\s+hai)\??$", re.I),
+    re.compile(r"^(?P<p>.+?)\s+(?:कैसे\s+(?:जाऊं|जाऊँ|जाएं)|का\s+रास्ता\s+(?:बताओ|दिखाओ)|ले\s+चलो|जाना\s+है)$"),
+]
+_NAV_TARGET_JUNK = re.compile(r"^(?:the\s+|a\s+)?|\s+(?:by car|on the map|now|abhi|jaldi|please)$", re.I)
+# Saving a place: "save this location as home", "save this place as office", "save my location as gym",
+# "save India Gate as favourite", "is jagah ko home naam se save karo", "yeh location office ke naam se save karo"
+_SAVE_HERE = re.compile(r"^(?:please\s+)?(?:save|mark|remember)\s+(?:this|my|the current|current|my current)\s+"
+                        r"(?:location|place|spot|address|position)\s+as\s+(?:my\s+)?(?P<l>.+?)$", re.I)
+_SAVE_HERE_HI = re.compile(r"^(?:is|iss|ye|yeh|meri|meri\s+abhi\s+ki)\s+(?:jagah|location|place)\s+(?:ko\s+)?(?P<l>.+?)\s+"
+                           r"(?:ke\s+|ki\s+)?(?:naam\s+se\s+)?save\s+(?:karo|kar do|kardo|kar lo)$", re.I)
+_SAVE_PLACE = re.compile(r"^(?:please\s+)?(?:save|mark)\s+(?P<p>.+?)\s+as\s+(?:my\s+)?(?P<l>.+?)$", re.I)
+_STOP_NAV = re.compile(r"^(?:stop|end|cancel|close|exit)\s+(?:the\s+)?(?:navigation|directions|route|map)$"
+                       r"|^(?:navigation|directions|route|map)\s+(?:band karo|band kar do|stop karo|hatao)$", re.I)
+
+
+def _nav_intent(raw: str, lang: str) -> Intent | None:
+    if _STOP_NAV.fullmatch(raw.strip(" .!")):
+        return Intent("ui", {"command": "stop_nav"}, lang)
+    for rx in (_SAVE_HERE, _SAVE_HERE_HI):
+        if m := rx.fullmatch(raw):
+            label = m["l"].strip(" .!?\"'")
+            if label and len(label) <= 40:
+                return Intent("save_place", {"label": label, "place": ""}, lang, label="Places")
+    if (m := _SAVE_PLACE.fullmatch(raw)) and not re.search(r"\b(?:pdf|report|file|document|model|draft|image|photo)\b", m["p"], re.I):
+        return Intent("save_place", {"label": m["l"].strip(" .!?\"'"), "place": m["p"].strip()}, lang, label="Places")
+    for rx in _NAV:
+        if m := rx.fullmatch(raw):
+            place = _NAV_TARGET_JUNK.sub("", m["p"].strip(" .!?")).strip()
+            # "take me through it", "let's go", "chalo": not a place
+            if not place or len(place) > 80 or re.fullmatch(
+                    r"(?:it|this|that|there|here|back|ahead|now|chalo|chale|yahan|wahan|sleep|bed|so|sona|settings|the next\s+\w+"
+                    r"|next\s+\w+|previous\s+\w+|(?:the\s+)?(?:top|bottom|start|end)(?:\s+of\s+.+)?)", place, re.I):
+                return None
+            return Intent("navigate", {"place": place}, lang, label="Maps")
+    return None
+
+
 # "... arc reactor ok", "... please bro": words said to PLAG, not part of what to draw
 _FILLER_TAIL = re.compile(r"(?:[\s,]+(?:ok|okay|okk|please|pls|plz|bro|yaar|jaldi|now|na))+[\s.!?]*$", re.I)
 _MODEL3D_HI = re.compile(r"^(?P<p>.+?)\s+(?:ka|ki|का|की)\s+3d\s+(?:model|मॉडल)\s+(?:banao|bana do|banaiye|बनाओ|बना दो)$", re.I)
@@ -293,6 +351,7 @@ _LOOKUP = [
                r"|ke\s+baare\s+(?:mein|me)\s+(?:batao|bataiye|bata do))\??$", re.I),
     re.compile(r"^(?P<q>.+?)\s+(?:कौन\s+(?:है|था|थी)|क्या\s+(?:है|होता\s+है)|के\s+बारे\s+में\s+बताओ)\??$"),
 ]
+_EXPLICIT_LOOKUP = re.compile(r"^(?:look up|search wikipedia|wikipedia)\b", re.I)
 _NOT_LOOKUP = re.compile(r"\b(?:my|me|mine|i|you|your|this|that|it|time|weather|date|day|today|battery|news|mera|meri|mujhe"
                          r"|tum|tumhara|aap|aapka|ye|yeh|plag|mausam|samay|baje)\b|मेरा|मेरी|तुम|आप|यह|ये", re.I)
 
@@ -318,6 +377,10 @@ def _files_intent(raw: str, t: str, lang: str) -> Intent | None:
 
 
 def _lookup_intent(raw: str, lang: str) -> Intent | None:
+    # "who is Modi ji" / "ISRO kya hai": the AI knows, so it answers straight away (2026-09-25: going to Wikipedia and
+    # the news first made every question slow). Only an explicit "look up X" / "wikipedia X" searches.
+    if not _EXPLICIT_LOOKUP.match(raw):
+        return None
     for rx in _LOOKUP:
         if m := rx.fullmatch(raw):
             q = re.sub(r"^(?:a|an|the)\s+", "", m["q"].strip(" ?.!"), flags=re.I)
@@ -639,6 +702,10 @@ def parse(text: str, ctx: str | None = None) -> Intent | None:
     if not t:
         return None
     raw = _strip(text)
+    if intent := _nav_intent(raw, lang):  # directions and saved places, before "save" (a PDF) gets it
+        return intent
+    if _EXPLICIT_LOOKUP.match(raw) and (intent := _lookup_intent(raw, lang)):  # you named Wikipedia: not the app you're in
+        return intent
     if m := _SAVE.fullmatch(raw):  # "save", "save the PDF", "ise save karo": keep the latest draft
         what = (m["w"] or m["w2"] or "").casefold()
         kind = "3d" if re.search(r"3d|model", what) else "pdf" if what and re.search(r"pdf|report|essay|document|doc|file|letter|story", what) else ""
@@ -676,6 +743,8 @@ def parse(text: str, ctx: str | None = None) -> Intent | None:
         return Intent("ui", {"command": "camera_on"}, lang)
     if _CAMERA_OFF.fullmatch(t):
         return Intent("ui", {"command": "camera_off"}, lang)
+    if m := _SCREEN_LOOK.fullmatch(t):
+        return Intent("screen_look", {"question": "" if m["plain"] else raw}, lang, label="Screen")
     if _CAMERA_LOOK.search(t):
         return Intent("camera_look", {}, lang)
     for command, rx in _UI:

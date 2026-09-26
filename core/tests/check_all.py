@@ -420,6 +420,181 @@ with TestClient(app) as c:
     res = turn(c, "save it")
     check("'save' with nothing made yet says so", acts(res) == "save_draft" and "no" in res.get("reply", "").lower(), res.get("reply"))
 
+    print("\"sir\", your language, and feeling")
+    from plag_core import agent as agent_p  # noqa: E402
+    from plag_core import edgevoice as edgevoice_mod  # noqa: E402
+    sp = " ".join(agent_p.system_prompt("auto").split())
+    check('PLAG calls you "sir", never "bro"', 'Always call the user "sir" (never "bro"' in sp and "Haan bro" not in sp)
+    check("it answers in the language you used (English -> English, Hindi -> Hindi)",
+          "SAME language as the user's latest message" in sp and "English -> reply only in English" in sp)
+    check("good news gets real joy ('Wow sir, that's amazing!', mood excited)", "react with real joy" in sp
+          and "Wow sir, that's amazing!" in sp and 'mood "excited"' in sp)
+    check("the camera answers call you sir too", 'Call the user "sir"' in agent_p.vision_prompt("mixed"))
+    joy, sad = sarvam._body("Wow sir, amazing!", "excited"), sarvam._body("Oh no sir", "sorry")
+    check("Sarvam: joy is livelier (faster, more expressive), sad is softer", joy["temperature"] > 0.6 > sad["temperature"]
+          and joy["pace"] > sad["pace"] and joy["language_code"] == "en-IN", f"{joy} {sad}")
+    check("Sarvam: Hinglish is spoken in Hindi", sarvam._body("Arre waah sir, kya baat hai!", "excited")["language_code"] == "hi-IN")
+    import edge_tts as _edge_tts  # noqa: E402
+    calls: list[tuple] = []
+
+    class _FakeCommunicate:
+        def __init__(self, text, voice, rate="+0%", pitch="+0Hz", **_k):
+            calls.append((text, voice, rate, pitch))
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mp3"}
+    saved_edge = (_edge_tts.Communicate, edgevoice.usable, edgevoice_mod.CACHE)
+    try:
+        _edge_tts.Communicate, edgevoice.usable, edgevoice_mod.CACHE = _FakeCommunicate, (lambda: True), Path(tempfile.mkdtemp())
+        import asyncio as _a_e  # noqa: E402
+        _a_e.run(edgevoice.speak("Wow sir, that's amazing!", "excited"))
+        check("Edge: you spoke English, the English voice answers, brighter for joy",
+              calls[-1][1] == "en-IN-PrabhatNeural" and calls[-1][3] == "+9Hz" and calls[-1][2].startswith("+"), str(calls[-1:]))
+        _a_e.run(edgevoice.speak("Arre waah sir, kya baat hai!", "excited"))
+        check("Edge: Hindi is spoken by the Hindi voice", calls[-1][1] == "hi-IN-MadhurNeural" and "क्या" in calls[-1][0], str(calls[-1:]))
+    finally:
+        _edge_tts.Communicate, edgevoice.usable, edgevoice_mod.CACHE = saved_edge
+
+    print("messages only when you ask for one")
+    real_think2 = _agent._think
+
+    async def _guess_send(*_a, **_k):
+        return "stub", {"transcript": "Land", "language": "en", "reply": "", "mood": "calm",
+                        "actions": [{"type": "whatsapp_send", "contact": "Omi", "message": "Land"}]}, 5
+    try:
+        _agent._think = _guess_send
+        _agent.pending_ask = None
+        res = turn(c, "Land", followup="window", heard_by="NVIDIA Parakeet")
+        check("a stray word after a reply is never sent as a message (2026-09-25: 'Land' went to Omi)", res.get("silent") is True,
+              str(res)[:160])
+        res = turn(c, "Land")
+        check("...and said to PLAG, it asks instead of guessing", acts(res) != "whatsapp_send" and "?" in res.get("reply", ""),
+              f"{acts(res)} {res.get('reply')!r}")
+    finally:
+        _agent._think = real_think2
+    turn(c, "send a message to Rahul")
+    res = turn(c, "go ahead", followup="answer")
+    check("'go ahead' is said to PLAG, not sent: it asks again", acts(res) == "chat" and "What should I send" in res.get("reply", ""),
+          f"{acts(res)} {res.get('reply')!r}")
+    res = turn(c, "I'll be late", followup="answer")
+    check("...then your real message goes", acts(res) == "whatsapp_send" and res["action"].get("contact") == "Rahul"
+          and res["action"].get("message") == "I'll be late", str(res.get("action")))
+    check("'mausam kholo aur Omi ko message bhejo' is two requests, not a contact called 'mausam kholo aur Omi'",
+          parse_many("mausam kholo aur obi bro Bangalore ko message bhejo") is None)
+
+    print("WhatsApp: one search, results read off the screen")
+
+    class _FakeComposer:
+        def __init__(self, name):
+            self.CurrentName = whatsapp.COMPOSER + name
+
+    class _FakePage:
+        def __init__(self, titles):
+            self.titles, self.clicked = titles, []
+
+        def result_rows(self, box):
+            return [(t, t) for t in self.titles]  # the "row" is its title here
+
+        def click(self, row):
+            self.clicked.append(row)
+
+        def composer(self):
+            return _FakeComposer(self.clicked[-1]) if self.clicked else None
+
+        def _wait(self, get, timeout, every=0.1):
+            return get()
+    typed_names: list[str] = []
+    saved_ts = whatsapp._type_search
+    try:
+        whatsapp._type_search = lambda page, box, q: typed_names.append(q)
+        p = _FakePage(["Omi Bro Shotu Bangalore", "Bhoomix", "🌿 bhoomiX 🌿"])
+        got = whatsapp._search_once(p, None, "omi", "omi", [])
+        check("'omi': typed once, 'Bhoomix' skipped, only Omi's chat opened", typed_names == ["omi"]
+              and p.clicked == ["Omi Bro Shotu Bangalore"] and got and got[1] == "Omi Bro Shotu Bangalore", f"{typed_names} {p.clicked}")
+        p = _FakePage(["Rahul Sharma", "Rahul Verma"])
+        try:
+            whatsapp._search_once(p, None, "rahul", "rahul", [])
+            options = None
+        except whatsapp._Ambiguous as e:
+            options = e.options
+        check("two Rahuls: PLAG asks which, before opening either", options == ["Rahul Sharma", "Rahul Verma"] and p.clicked == [],
+              f"{options} {p.clicked}")
+        p = _FakePage(["Rahul Verma", "Rahul"])
+        whatsapp._search_once(p, None, "rahul", "rahul", [])
+        check("the exact name wins over a longer one", p.clicked == ["Rahul"], str(p.clicked))
+        p = _FakePage(["Priyanka", "Bhoomix"])
+        check("nobody fits: nothing is opened", whatsapp._search_once(p, None, "priya", "priya", []) is None and p.clicked == [])
+    finally:
+        whatsapp._type_search = saved_ts
+    check("a row's chat name, without its time and last message",
+          whatsapp._ROW_END.sub("", "Omi Bro Shotu Bangalore 2:56 pm You deleted this message").strip() == "Omi Bro Shotu Bangalore"
+          and whatsapp._ROW_END.sub("", "Rahul Sharma Yesterday Ok bhai").strip() == "Rahul Sharma")
+
+    print("directions and saved places (map services stubbed: no network)")
+    from plag_core import location as loc_mod  # noqa: E402
+    from plag_core import navigation as nav  # noqa: E402
+    for said, want in [("take me to India Gate", ("navigate", "India Gate")), ("India Gate kaise jaun", ("navigate", "India Gate")),
+                       ("airport ka rasta batao", ("navigate", "airport")), ("take me home", ("navigate", "home")),
+                       ("how far is Noida", ("navigate", "Noida")), ("save this location as home", ("save_place", "home")),
+                       ("is jagah ko office naam se save karo", ("save_place", "office")),
+                       ("look at my screen", ("screen_look", "")), ("meri screen dekho", ("screen_look", "")),
+                       ("what does this error say", ("screen_look", "what does this error say"))]:
+        got = parse_many(said)
+        arg = (got[0].args.get("place") if got and got[0].action == "navigate" else got[0].args.get("label")
+               if got and got[0].action == "save_place" else got[0].args.get("question") if got else None)
+        check(f"{said!r} -> {want[0]}", bool(got) and got[0].action == want[0] and arg == want[1], str([(i.action, i.args) for i in got or []]))
+    for said in ("I want to go to sleep", "take me through it", "YouTube chalo", "save the pdf", "what is this"):
+        got = parse_many(said)
+        check(f"{said!r} isn't directions", not got or got[0].action not in ("navigate", "save_place"), str([(i.action, i.args) for i in got or []]))
+    check("a polyline decodes (Google's own example)",
+          nav.decode_polyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@") == [[38.5, -120.2], [40.7, -120.95], [43.252, -126.453]])
+    check("the spoken words decide the arrow ('Turn left' sent as a roundabout)", nav._turn("roundabout", "Turn left onto Pant Marg") == "left"
+          and nav._turn("depart", "Head west on Kartavya Path") == "depart" and nav._turn("", "Make a slight right") == "slight-right")
+    steps = [{"text": "Head west", "turn": "depart", "distance_m": 400, "lat": 28.6139, "lng": 77.2088},
+             {"text": "Turn left", "turn": "left", "distance_m": 200, "lat": 28.6141, "lng": 77.2040},
+             {"text": "You have arrived", "turn": "arrive", "distance_m": 0, "lat": 28.6160, "lng": 77.2040}]
+    i, m = nav.next_step(steps, {"lat": 28.6140, "lng": 77.2060})
+    check("halfway down the first road, the next turn is the left", i == 1 and 150 < m < 250, f"{i} {m:.0f}")
+    saved_places, saved_pos, saved_place, saved_search, saved_route = nav.PLACES, loc_mod.position, loc_mod.place, nav.search, nav.route
+    try:
+        nav.PLACES = Path(tempfile.mkdtemp()) / "places.json"
+
+        async def _pos(fresh=False):
+            return {"lat": 28.6139, "lon": 77.2090, "accuracy_m": 30, "at": 1.0}
+
+        async def _place(fresh=False):
+            return {"lat": 28.6139, "lon": 77.2090, "accuracy_m": 30, "area": "Rajpath", "city": "New Delhi", "address": "Rajpath, New Delhi"}
+
+        async def _search(q, near=None):
+            return {"name": "India Gate", "address": "India Gate, New Delhi", "lat": 28.6129, "lng": 77.2295}
+
+        async def _route(o, d):
+            return {"distance_m": 5800, "duration_s": 660, "steps": steps, "path": [[28.6139, 77.2088], [28.6129, 77.2295]],
+                    "traffic": True, "by": "Ola Maps"}
+        loc_mod.position, loc_mod.place, nav.search, nav.route = _pos, _place, _search, _route
+        res = turn(c, "take me to India Gate")
+        cl = res.get("client") or {}
+        check("directions: the live map gets the route, PLAG tells the trip like Jarvis", cl.get("type") == "route"
+              and cl.get("dest", {}).get("name") == "India Gate" and len(cl.get("steps", [])) == 3
+              and "5.8 km" in res.get("reply", "") and "11 min" in res.get("reply", "") and "sir" in res.get("reply", "").lower(),
+              f"{res.get('reply')!r} {str(cl)[:120]}")
+        res = turn(c, "save this location as home")
+        check("'save this location as home' saves where you are", acts(res) == "save_place" and nav.find_saved("home")
+              and nav.find_saved("home")["address"] == "Rajpath, New Delhi", f"{res.get('reply')!r}")
+        check("'ghar' and 'my home' find the saved home", bool(nav.find_saved("ghar") and nav.find_saved("my home")))
+        res = turn(c, "take me home")
+        check("'take me home' goes to the saved home, no search", (res.get("client") or {}).get("dest", {}).get("name") == "home",
+              str((res.get("client") or {}).get("dest")))
+        check("'stop navigation' closes the map", (turn(c, "stop navigation").get("client") or {}).get("command") == "stop_nav")
+    finally:
+        nav.PLACES, loc_mod.position, loc_mod.place, nav.search, nav.route = saved_places, saved_pos, saved_place, saved_search, saved_route
+    res = turn(c, "look at my screen")
+    check("'look at my screen': the dashboard takes the screenshot", (res.get("client") or {}).get("type") == "screen_look")
+    check("the screen reader translates, reads errors, and never reads out passwords", all(
+        w in agent_p.vision_prompt("en", screen=True) for w in ("translate it", "next step", "passwords")))
+    check("a screenshot is accepted by /v1/vision (not refused as an unknown source)",
+          c.post("/v1/vision", headers=H, json={"image": "x" * 200, "source": "screen"}).status_code == 415)
+
     print("more Hinglish, straight from the fast path")
     for said, want in [("YouTube pe Arijit Singh ke gaane chala do", ("play_youtube", "query", "arijit singh ke gaane")),
                        ("kal delhi mein baarish hogi kya", ("weather", "city", "delhi")),
@@ -633,9 +808,16 @@ with TestClient(app) as c:
           __import__("plag_core.documents", fromlist=["x"]).markdown_html("**bold**"))
     for said, want in [("open downloads", "open_folder"), ("what's on my desktop", "list_files"),
                        ("open my resume from the desktop", "open_file"), ("desktop se resume kholo", "open_file"),
-                       ("who is Sundar Pichai", "lookup"), ("ISRO kya hai", "lookup"), ("tell me about the Taj Mahal", "lookup")]:
+                       ("search wikipedia for Sundar Pichai", "lookup"), ("wikipedia ISRO", "lookup")]:
         res = turn(c, said)
         check(f"{said!r} -> {want}", acts(res) == want and res.get("model") == "fast path", f"{res.get('action')} / {res.get('reply')!r}")
+    from plag_core.fastpath import parse_many as _pm_q  # noqa: E402
+    for said in ("who is Modi ji", "Modi ji kaun hai", "ISRO kya hai", "tell me about the Taj Mahal"):
+        check(f"{said!r}: the AI answers from what it knows, no web search first", not any(
+            i.action == "lookup" for i in (_pm_q(said) or [])), str([(i.action, i.args) for i in (_pm_q(said) or [])]))
+    import plag_core.agent as _agent_q  # noqa: E402
+    check("the AI is told to answer ordinary questions directly, lookup only for latest news",
+          "do NOT use lookup" in _agent_q.system_prompt("auto") and "latest news" in _agent_q.system_prompt("auto"))
     check("'open youtube' is still the website, not a file", acts(turn(c, "open youtube")) == "open_url")
     check("questions about you aren't Wikipedia lookups", acts(turn(c, "what is my name")) != "lookup")
     from plag_core import files as files_mod

@@ -10,6 +10,7 @@ interface PlagBridge {
   onVisible(fn: (visible: boolean) => void): () => void;
   /** Clears the dashboard's own web, shader and script caches. */
   clearCache(): Promise<boolean>;
+  captureScreen(): Promise<string | null>; // a JPEG data URL of the screen, or null
   notify(title: string, body: string): void;
   pickGoogleClient(): Promise<string | null>;
   /** Bring the dashboard window to the front (used by the wake word). */

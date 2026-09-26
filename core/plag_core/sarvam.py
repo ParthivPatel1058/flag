@@ -28,7 +28,12 @@ KEY = "sarvam_api_key"
 RATE = 24000
 MAX_CHARS = 2500  # Bulbul v3's limit per request
 CACHE = TTS_CACHE_DIR / "sarvam"
-PACE = {"calm": 1.0, "cheerful": 1.05, "excited": 1.1, "serious": 0.97, "sorry": 0.95, "curious": 1.02}
+# How each mood sounds (2026-09-25: "react with more joy… with more energy"): Bulbul v3's pace, and its temperature,
+# which is how expressive the voice is (0.01-2.0, default 0.6)
+# 2026-09-26: the user wants a professional male voice, not an excitable one: small, steady variations only (a fast
+# pace also raised the pitch and made the male voice sound lighter)
+PACE = {"calm": 1.0, "cheerful": 1.02, "excited": 1.04, "serious": 0.97, "sorry": 0.96, "curious": 1.0}
+TEMPERATURE = {"calm": 0.5, "cheerful": 0.6, "excited": 0.7, "serious": 0.45, "sorry": 0.5, "curious": 0.55}
 
 
 class SarvamError(Exception):
@@ -77,8 +82,8 @@ class Sarvam:
         hindi = is_hindi(text)
         pace = min(2.0, max(0.5, float(s["speed"]) * PACE.get(mood, 1.0)))
         return {"text": (for_voice(text) if hindi else text)[:MAX_CHARS], "language_code": "hi-IN" if hindi else "en-IN",
-                "model": MODEL, "speaker": s["sarvam_speaker"], "pace": round(pace, 2), "speech_sample_rate": RATE,
-                "output_audio_codec": "wav"}
+                "model": MODEL, "speaker": s["sarvam_speaker"], "pace": round(pace, 2),
+                "temperature": TEMPERATURE.get(mood, 0.6), "speech_sample_rate": RATE, "output_audio_codec": "wav"}
 
     async def _request(self, body: dict, key: str) -> httpx.Response:
         return await self._http.post(API, headers={"api-subscription-key": key}, json=body)
@@ -90,8 +95,8 @@ class Sarvam:
             raise SarvamError("Sarvam is resting or has no key.", "unavailable")
         body = self._body(text, mood)
         CACHE.mkdir(parents=True, exist_ok=True)
-        path = CACHE / (hashlib.sha1(f"{body['speaker']}|{body['language_code']}|{body['pace']}|{body['text']}".encode())
-                        .hexdigest()[:20] + ".wav")
+        path = CACHE / (hashlib.sha1(f"{body['speaker']}|{body['language_code']}|{body['pace']}|{body['temperature']}|"
+                                     f"{body['text']}".encode()).hexdigest()[:20] + ".wav")
         if path.exists():
             return path.read_bytes()
         t0 = time.perf_counter()

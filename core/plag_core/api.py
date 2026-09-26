@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__, approvals, whatsapp
-from . import documents, drafts, imagegen, location, model3d, weather
+from . import documents, drafts, imagegen, location, model3d, navigation, weather
 from . import memory as mem
 from . import settings as app_settings
 from .elevenlabs import REALTIME_ERRORS, ElevenError, eleven
@@ -514,7 +514,7 @@ class VisionRequest(BaseModel):
     image: str = Field(min_length=100, max_length=8_000_000)  # base64 JPEG
     lang: str = "auto"
     question: str = Field(default="", max_length=600)
-    source: str = Field(default="camera", pattern=r"^(camera|upload)$")  # an uploaded picture or the camera
+    source: str = Field(default="camera", pattern=r"^(camera|upload|screen)$")  # the camera, a picture, or your screen
 
 
 class ImagineRequest(BaseModel):
@@ -770,6 +770,21 @@ async def tts(req: SpeakRequest):
     except ProviderError as e:
         return JSONResponse({"error": str(e.code), "message": str(e), "tried": e.tried}, status_code=503)
     return Response(wav, media_type="audio/wav", headers={"X-PLAG-Cache": "hit" if cached else "miss"})
+
+
+@app.get("/v1/location/now")
+async def location_now():
+    """Where the laptop is right now, for the live map while navigating (asked every ~15 s, only during a trip)."""
+    try:
+        p = await location.position(fresh=True)
+    except location.LocationError as e:
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=409)
+    return {"lat": p["lat"], "lng": p["lon"], "accuracy_m": p["accuracy_m"]}
+
+
+@app.get("/v1/places")
+async def places_list():
+    return {"places": list(navigation.saved().values())}
 
 
 @app.get("/v1/wake")

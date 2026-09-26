@@ -14,7 +14,13 @@ from .config import TTS_CACHE_DIR
 from .hinglish import for_voice, is_hindi
 
 CACHE = TTS_CACHE_DIR / "edge"
-RATE = {"calm": 0, "cheerful": 5, "excited": 10, "serious": -3, "sorry": -5, "curious": 2}  # % faster or slower
+# how each mood sounds: % faster or slower, and a brighter or lower pitch (joy: faster and higher)
+RATE = {"calm": 0, "cheerful": 2, "excited": 4, "serious": -3, "sorry": -4, "curious": 1}
+PITCH = {"calm": 0, "cheerful": 1, "excited": 2, "serious": -2, "sorry": -3, "curious": 1}  # steady, professional
+# the same person in the other language: English is spoken by the English voice, Hindi by the Hindi one
+PAIR = {"hi-IN-MadhurNeural": "en-IN-PrabhatNeural", "en-IN-PrabhatNeural": "hi-IN-MadhurNeural",
+        "hi-IN-SwaraNeural": "en-IN-NeerjaNeural", "en-IN-NeerjaNeural": "hi-IN-SwaraNeural",
+        "en-IN-NeerjaExpressiveNeural": "hi-IN-SwaraNeural"}
 
 
 class EdgeError(Exception):
@@ -45,17 +51,19 @@ class EdgeVoice:
         import edge_tts
 
         s = settings.get()
-        voice = s["edge_voice"]
-        spoken = for_voice(text) if voice.startswith("hi-IN") and is_hindi(text) else text
+        voice, hindi = s["edge_voice"], is_hindi(text)
+        if hindi != voice.startswith("hi-IN"):
+            voice = PAIR.get(voice, voice)  # you spoke English: the English voice answers (and the other way round)
+        spoken = for_voice(text) if voice.startswith("hi-IN") and hindi else text
         pct = round((float(s["speed"]) - 1) * 100) + RATE.get(mood, 0)
-        rate = f"{pct:+d}%"
+        rate, pitch = f"{pct:+d}%", f"{PITCH.get(mood, 0):+d}Hz"
         CACHE.mkdir(parents=True, exist_ok=True)
-        path = CACHE / (hashlib.sha1(f"{voice}|{rate}|{spoken}".encode()).hexdigest()[:20] + ".mp3")
+        path = CACHE / (hashlib.sha1(f"{voice}|{rate}|{pitch}|{spoken}".encode()).hexdigest()[:20] + ".mp3")
         if path.exists():
             return path.read_bytes()
         t0, audio = time.perf_counter(), bytearray()
         try:
-            async for chunk in edge_tts.Communicate(spoken, voice, rate=rate).stream():
+            async for chunk in edge_tts.Communicate(spoken, voice, rate=rate, pitch=pitch).stream():
                 if chunk["type"] == "audio":
                     audio += chunk["data"]
         except Exception as e:  # the service is unofficial: it can change or refuse without notice
