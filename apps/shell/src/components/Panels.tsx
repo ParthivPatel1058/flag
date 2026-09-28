@@ -543,13 +543,16 @@ function AccountsBlock() {
       {accounts.length ? (
         <ul className="conn-list acct-list">
           {accounts.map((a) => {
-            const [tone, label] = ACCOUNT_STATE[a.state] ?? ['ready', a.state];
+            const [tone0, label] = ACCOUNT_STATE[a.state] ?? ['ready', a.state];
+            const tone = a.error ? 'degraded' : tone0;
             return (
               <li key={a.id} className={`conn c-${tone}`}>
                 <Badge name={a.name} color={a.color} />
                 <div className="conn-main">
                   <span className="conn-name">{a.name}{a.unread ? <em className="acct-unread">{a.unread}</em> : null}</span>
-                  <span className="conn-detail">{a.host} · {label}</span>
+                  <span className={`conn-detail${a.error ? ' acct-err' : ''}`} title={a.error || `${a.host} · ${label}`}>
+                    {a.error ? a.error : `${a.host} · ${label}`}
+                  </span>
                 </div>
                 <span className="acct-actions">
                   <button className="conn-btn" onClick={() => void openAccount(a)}>{a.state === 'signin' ? 'Sign in' : 'Open'}</button>

@@ -113,6 +113,7 @@ export interface Account {
   state: 'starting' | 'signin' | 'watching' | 'paused' | 'offline' | 'limit';
   unread: number;
   added: string;
+  error?: string; // the last problem with this account, shown on its row
 }
 /** A new message on one of your accounts, with the reply PLAG drafted (you send it). */
 export interface InboxItem {
