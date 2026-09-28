@@ -133,6 +133,33 @@ banao”) uses the camera: Gemini describes what you're showing and FLUX draws i
 (NVIDIA's hosted editing models only accept its own sample images). Every image is saved to `Pictures\PLAG` and shown
 on the dashboard with Open / Show in folder. Key: Credential Manager, `PLAG / nvidia_image_api_key`.
 
+**Autopilot (agent mode):** give PLAG a goal and it works through it on its own, one step at a time: the AI picks a
+tool, PLAG runs it (same checks and audit log as any command), reads the result and decides the next step, up to 8
+steps. The Now panel shows each step live. “Brief me” / “plan my day” → weather, calendar, important mail, new
+messages, reminders and top news, then the 2–3 things that need you first. Any goal: “autopilot: find the best
+laptop under 60k and write me a report”, “check my mail and remind me about anything urgent”, “agent, research
+the monsoon forecast and draw a poster about it”. PLAG also switches to autopilot by itself when a request needs
+several steps that depend on each other. It never sends messages, calls, deletes, installs or pays on its own: when
+a goal needs a message sent, it drafts it and asks you.
+
+**Keys that make PLAG better** (all optional except Gemini; each one saved the same way as step 1 of setup, name
+after `PLAG /`):
+
+| Key name | What it adds | Where to get it |
+|---|---|---|
+| `gemini_api_key` | The main brain, camera and screen reading (required) | aistudio.google.com |
+| `nvidia_glm_api_key`, `nvidia_muse_api_key` | GLM 5.3 Flash and Muse race Gemini (commands, answers, drafts, autopilot) | build.nvidia.com |
+| `nvidia_llm_api_key` | gpt-oss-20b and mistral-nemotron in the race | build.nvidia.com |
+| `nvidia_hearing_api_key` | Parakeet: hears English, Hindi and Hinglish in ~0.3 s | build.nvidia.com |
+| `nvidia_speech_api_key` | Leo, the streamed voice | build.nvidia.com |
+| `nvidia_image_api_key`, `nvidia_trellis_api_key`, `nvidia_weather_api_key` | Images, 3D models, the weather simulation | build.nvidia.com |
+| `groq_api_key` | Llama 3.3 70B on Groq: usually the fastest answer of all | console.groq.com (free) |
+| `tavily_api_key` | Real web results for answers and the autopilot | tavily.com (1,000 free a month) |
+| `sarvam_api_key` | Indian voices (Settings → Voice) | dashboard.sarvam.ai |
+| `elevenlabs_api_key` | Your own voice and realtime hearing (Settings → ElevenLabs) | elevenlabs.io |
+| `olamaps_api_key` | Directions with live traffic in India | maps.olakrutrim.com |
+| Google OAuth client (a file, not a key) | Gmail + Calendar, read-only (Connections → Connect) | console.cloud.google.com |
+
 **Inbox agent: your accounts (Gmail, LinkedIn, Instagram, X, anything):** Connections → *Your accounts* → **+ Connect**,
 type the site's address (`linkedin.com`) or pick one of the chips. PLAG opens the real sign-in page in its own window;
 you sign in there (PLAG never sees your password) and close it. Each account keeps its own private, signed-in session.

@@ -21,6 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__, approvals, whatsapp
 from . import documents, drafts, imagegen, inbox, location, model3d, navigation, weather
+from .websearch import websearch
 from . import memory as mem
 from . import settings as app_settings
 from .elevenlabs import REALTIME_ERRORS, ElevenError, eleven
@@ -418,6 +419,19 @@ def inbox_row() -> dict:
             "detail": detail}
 
 
+def websearch_row() -> dict:
+    h = websearch.health
+    if not websearch.key():
+        state, detail = "off", "Optional · add PLAG / tavily_api_key for web results in answers and the autopilot"
+    elif not websearch.ready():
+        state, detail = "degraded", "Tavily refused the key or the monthly limit is used · Wikipedia and news still work"
+    elif h and h["ok"]:
+        state, detail = "online", f"Tavily · {h['ms'] / 1000:.1f} s"
+    else:
+        state, detail = "ready", "Tavily · used by “who is…”, “look up…” and the autopilot"
+    return {"id": "websearch", "name": "Web search", "role": "Real web results", "state": state, "detail": detail}
+
+
 def connectors() -> list[dict]:
     def latest(models: list[str]) -> tuple[str, dict] | None:
         seen = [(m, gemini.health[m]) for m in models if m in gemini.health]
@@ -461,6 +475,7 @@ def connectors() -> list[dict]:
         location_row(),
         google_row(),
         inbox_row(),
+        websearch_row(),
     ]
 
 

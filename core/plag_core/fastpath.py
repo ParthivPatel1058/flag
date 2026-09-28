@@ -192,6 +192,13 @@ _REMEMBER = re.compile(r"^(?:please\s+)?(?:remember|note down|make a note|yaad r
 _REMEMBER_TAIL = re.compile(r"^(?P<t>.+?)\s+(?:yaad rakhna|yaad rakho|याद रखना|याद रखो)$", re.I)
 _RECALL = re.compile(r"^(?:what do you remember(?: about me)?|what do you know about me|what have i told you"
                      r"|show (?:my )?memor(?:y|ies)|tumhe kya yaad hai|kya yaad hai|तुम्हें क्या याद है|क्या याद है)\??$", re.I)
+BRIEFING = ("Give me my briefing: today's weather where I am, my calendar for today, important emails, new messages on "
+            "my accounts, my reminders, and the top 3 news headlines in India. Then tell me the 2-3 things that need my "
+            "attention first.")
+# The autopilot: a daily briefing, or any goal said as "autopilot: ..." / "agent, ..."
+_BRIEFING = re.compile(r"^(?:brief me|(?:give me )?(?:my |the )?(?:daily |morning )?briefing|plan my day|what'?s my day(?: look)?(?: like)?"
+                       r"|how does my day look|aaj ka plan(?: batao)?|mera din kaisa hai|aaj kya kya hai)\??$", re.I)
+_AUTOPILOT = re.compile(r"^(?:autopilot|agent|agent mode|auto mode|do this for me|handle this)\s*[:,-]?\s+(?P<g>.{6,})$", re.I)
 # New messages on connected accounts (LinkedIn, Instagram, Gmail…): never "message Rahul", which is a WhatsApp send
 _INBOX = re.compile(r"^(?:any (?:new |unread )?messages|(?:do i have |i have )?(?:any )?new messages|check (?:my )?(?:messages|inbox)"
                     r"|read (?:my )?(?:new )?messages|what'?s (?:new )?in my inbox|(?:show |open )?(?:my )?inbox"
@@ -662,6 +669,10 @@ def _memory_intent(raw: str, t: str, lang: str) -> Intent | None:
         if m := rx.fullmatch(t):
             d = (m.groupdict().get("d") or "").lower()
             return Intent("calendar_check", {"day": "tomorrow" if d in ("tomorrow", "kal", "कल") else "today"}, lang, label="Calendar")
+    if _BRIEFING.fullmatch(t):
+        return Intent("agent_task", {"goal": BRIEFING}, lang, label="Autopilot")
+    if m := _AUTOPILOT.fullmatch(raw):
+        return Intent("agent_task", {"goal": m["g"].strip()}, lang, label="Autopilot")
     if _INBOX.fullmatch(t):
         return Intent("inbox_check", {}, lang, label="Inbox")
     if _RECALL.fullmatch(t):

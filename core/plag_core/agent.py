@@ -21,7 +21,7 @@ from . import memory as mem
 from .google import GoogleError, google
 from pathlib import Path
 
-from . import documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
+from . import autopilot, documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
 from . import settings as app_settings
 from .elevenlabs import ElevenError, eleven
 from .imagegen import ImageError
@@ -48,7 +48,8 @@ CREATIVE_ACTIONS = ["generate_3d", "weather", "weather_sim", "where", "write",  
                     "open_file", "open_folder", "list_files", "lookup",  # your files, and Wikipedia + news
                     "save_draft",  # keep the PDF or 3D model PLAG just made (they're drafts until you say "save")
                     "navigate", "save_place",  # directions on a live map, and places saved by name ("home")
-                    "inbox_check", "inbox_reply"]  # new messages on your connected accounts, and drafting a reply
+                    "inbox_check", "inbox_reply",  # new messages on your connected accounts, and drafting a reply
+                    "agent_task"]  # autopilot: a goal PLAG works through on its own, step by step
 ACTIONS = ["none", "open_url", "open_app", "web_search", "play_youtube", "system_status", "whatsapp_send",
            "whatsapp_call", "whatsapp_open", "gmail_search", "research", "camera_look", "screen_look", "ui", *MEMORY_ACTIONS,
            *GOOGLE_ACTIONS, *IMAGE_ACTIONS, *CREATIVE_ACTIONS]
@@ -227,6 +228,12 @@ Return JSON for every user turn:
     LinkedIn message saying I'm interested", "Priya ko Instagram pe reply likho ki kal milte hain"). action.contact is
     the sender's name, action.text how to answer (their words; empty to let PLAG decide). PLAG only drafts it: the user
     sends it. Not for WhatsApp messages the user wants SENT (that's whatsapp_send). Leave reply empty.
+  - "agent_task": a GOAL that takes several steps where later steps depend on what earlier ones find, or an
+    open-ended job: "plan my day", "brief me", "find the best phone under 30k and write me a report", "check my
+    mail and remind me about anything urgent", "what should I reply to Ananya, check my calendar first", "research X
+    and draw a poster about it". PLAG's autopilot then works through it on its own. action.text is the goal in the
+    user's words (complete, in English). Don't use it for a single simple action, or a fixed list of simple actions
+    (use the normal actions for those). Leave reply empty.
   - "where": where the user is right now, their current location or address ("where am I", "mera address kya hai").
     PLAG reads it from Windows Location. action.text is "address" when they ask for the address. Leave reply empty.
   - "remember": the user asks you to remember something about them. action.text is the fact, written as a short
@@ -491,6 +498,8 @@ def _intent_from_action(a: dict, lang: str, reply: str) -> Intent:
         return Intent("research", {"topic": (a.get("text") or a.get("query")).strip()}, lang, "", "Research")
     elif kind == "whatsapp_open" and (a.get("contact") or "").strip():
         return Intent("whatsapp_open", {"contact": a["contact"].strip()}, lang, "", "WhatsApp")
+    elif kind == "agent_task" and (a.get("text") or a.get("query") or "").strip():
+        return Intent("agent_task", {"goal": (a.get("text") or a.get("query")).strip()}, lang, "", "Autopilot")
     elif kind == "inbox_check":
         return Intent("inbox_check", {}, lang, "", "Inbox")
     elif kind == "inbox_reply" and (a.get("contact") or "").strip():
@@ -627,7 +636,8 @@ def _action_label(intent: Intent) -> str:
             "list_files": f"List {args.get('folder', '')}", "lookup": f"Wikipedia + news: {args.get('query', '')}",
             "save_draft": "Save to Documents\\PLAG", "navigate": f"Directions to {args.get('place', '')}",
             "save_place": f"Save a place as {args.get('label', '')}", "inbox_check": "Check your inbox",
-            "inbox_reply": f"Draft a reply to {args.get('contact', '')}"}.get(a, "Act")
+            "inbox_reply": f"Draft a reply to {args.get('contact', '')}",
+            "agent_task": f"Autopilot: {args.get('goal', '')[:60]}"}.get(a, "Act")
 
 
 def _in_step(step, index: int, label: str):
@@ -638,7 +648,7 @@ def _in_step(step, index: int, label: str):
 
 
 # Plans worth an instant "On it." before the result: anything that takes more than a moment.
-_SLOW = {"web_search", "play_youtube", "whatsapp_send", "whatsapp_call", "whatsapp_open", "gmail_check", "gmail_search",
+_SLOW = {"agent_task", "web_search", "play_youtube", "whatsapp_send", "whatsapp_call", "whatsapp_open", "gmail_check", "gmail_search",
          "calendar_check", "generate_image", "research", "system_status", "weather", "weather_sim", "where",
          "write", "lookup"}
 CONTEXT_S = 600  # how long "the app you're in" carries over to your next command
@@ -1086,6 +1096,8 @@ class Agent:
             return await self._navigate(intent.args["place"], lang, task_id, step, out)
         if intent.action == "save_place":
             return await self._save_place(intent.args["label"], intent.args.get("place", ""), lang, task_id, step, out)
+        if intent.action == "agent_task":
+            return await autopilot.run(self, intent.args["goal"], lang, task_id, step)
         if intent.action in ("inbox_check", "inbox_reply"):
             return await self._inbox(intent, lang, step, out)
         if intent.action == "lookup":

@@ -105,13 +105,13 @@ export function VitalsPanel() {
   );
 }
 
-const STEP_LABEL: Record<string, string> = { listen: 'Listen', understand: 'Understand', look: 'Look', act: 'Act', reply: 'Reply', speak: 'Speak' };
-const STEP_ORB: Record<string, OrbState> = { listen: 'listening', understand: 'solving', look: 'searching', act: 'working', reply: 'composing' };
+const STEP_LABEL: Record<string, string> = { listen: 'Listen', understand: 'Understand', look: 'Look', plan: 'Plan', act: 'Act', reply: 'Reply', speak: 'Speak' };
+const STEP_ORB: Record<string, OrbState> = { listen: 'listening', understand: 'solving', look: 'searching', plan: 'solving', act: 'working', reply: 'composing' };
 // a plan's steps ("act0", "act1"…) sit between understanding and the reply, in order
 const rank = (name: string) => {
   const m = /^act(\d+)$/.exec(name);
   if (m) return 3 + Number(m[1]) / 100;
-  return ({ listen: 0, understand: 1, look: 2, act: 3, reply: 4, speak: 5 } as Record<string, number>)[name] ?? 4.5;
+  return ({ listen: 0, understand: 1, look: 2, plan: 2.5, act: 3, reply: 4, speak: 5 } as Record<string, number>)[name] ?? 4.5;
 };
 
 export function NowPanel() {
