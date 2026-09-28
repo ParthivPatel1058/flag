@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const accounts = require('./accounts.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const CORE_DIR = path.join(ROOT, 'core');
@@ -338,10 +339,14 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   registerShortcuts();
+  // connected accounts (Gmail, LinkedIn, Instagram…): signed-in sessions, watched for new messages
+  accounts.init({ core: () => ({ port: corePort, token: TOKEN }), notify, isTrusted });
+  accounts.startAll();
 });
 
 app.on('before-quit', () => {
   quitting = true;
   globalShortcut.unregisterAll();
+  accounts.stopAll();
   stopCore();
 });

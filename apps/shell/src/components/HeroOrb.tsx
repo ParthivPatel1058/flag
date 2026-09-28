@@ -186,6 +186,7 @@ export default function HeroOrb() {
     let raf = 0;
     let last = performance.now();
     let rot = 0;
+    let glowAt = 0;
     let level = 0;
     let remeasure = 0;
     let status = selectStatus(useStore.getState());
@@ -196,7 +197,7 @@ export default function HeroOrb() {
       raf = requestAnimationFrame(frame);
       // ~50 fps while PLAG is working or talking, ~24 fps at rest: the resting orb must stay cheap.
       const busy = status === 'listening' || status === 'thinking' || status === 'executing' || status === 'speaking';
-      if (now - last < (busy ? 19 : 41)) return;
+      if (now - last < (busy ? 19 : 55)) return;  // ~52 fps busy, ~18 fps at rest (idle orb stays very cheap)
       const dt = (reduce ? 0.2 : 1) * Math.min(0.05, (now - last) / 1000);
       last = now;
       if (document.hidden || S < 2) return;
@@ -221,6 +222,12 @@ export default function HeroOrb() {
         }
       }
       if (moving) lut = buildLut(pal);
+      // feed the aura behind the sphere the current lead colour (throttled: it's only a CSS variable)
+      if ((glowAt += dt) > 0.2) {
+        glowAt = 0;
+        const g = pal[0];
+        canvas.style.setProperty('--glow', `rgba(${g[0] | 0},${g[1] | 0},${g[2] | 0},${(0.1 + level * 0.22).toFixed(2)})`);
+      }
       rot += dt * 0.035;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

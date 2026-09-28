@@ -1,14 +1,73 @@
 import { useEffect, useState } from 'react';
 import {
-  clearCaches, elevenVoices, loadSettings, removeElevenKey, removeSarvamKey, saveElevenKey, saveSarvamKey, saveSettings,
-  type ElevenStatus, type Live, type Settings, type VoiceEngine,
+  clearCaches, elevenVoices, loadKeys, loadSettings, removeKey, saveKey, removeElevenKey, removeFishKey, removeSarvamKey, saveElevenKey, saveFishKey, saveSarvamKey,
+  saveSettings,
+  type ElevenStatus, type KeyService, type Live, type Settings, type VoiceEngine,
 } from '../lib/voice';
 import { CloseIcon } from './icons';
 
 type Voice = { id: string; name: string; category: string };
 
+const KEY_ROWS: { id: KeyService; name: string; what: string; where: string; url: string }[] = [
+  { id: 'tinyfish', name: 'TinyFish', what: 'Web search, page reading and a web agent that works on websites for you', where: 'agent.tinyfish.ai → API keys', url: 'https://agent.tinyfish.ai/api-keys' },
+  { id: 'calcom', name: 'Cal.com', what: 'Your meetings, free slots, booking link, and booking by voice (asks you first)', where: 'Cal.com → Settings → Security', url: 'https://app.cal.com/settings/developer/api-keys' },
+  { id: 'groq', name: 'Groq', what: 'The fastest answers (Llama 3.3 70B), free', where: 'console.groq.com → API keys', url: 'https://console.groq.com/keys' },
+  { id: 'tavily', name: 'Tavily', what: 'Backup web search when TinyFish isn’t set up', where: 'tavily.com → API keys', url: 'https://app.tavily.com' },
+];
+
+/** Optional keys: each is checked with its service, then kept in Windows Credential Manager (never shown again). */
+function KeysSection() {
+  const [keys, setKeys] = useState<Record<KeyService, boolean> | null>(null);
+  const [open, setOpen] = useState<KeyService | null>(null);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { void loadKeys().then(setKeys); }, []);
+  const save = async (id: KeyService) => {
+    setBusy(true);
+    const err = await saveKey(id, value);
+    setBusy(false);
+    setValue('');
+    setMsg(err ? { ok: false, text: err } : { ok: true, text: 'Saved in Windows Credential Manager.' });
+    if (!err) { setOpen(null); setKeys(await loadKeys()); }
+  };
+  return (
+    <section className="set-sec">
+      <h3>Keys</h3>
+      <p className="set-note">Optional connections. Each key is checked with its service, then kept in Windows Credential Manager; PLAG never shows it again.</p>
+      {KEY_ROWS.map((k) => (
+        <div key={k.id} className="key-row">
+          <div className="set-row">
+            <span><b>{k.name}</b> · {k.what}</span>
+            {keys?.[k.id] ? (
+              <span className="key-actions">
+                <span className="set-status ok">Connected</span>
+                <button className="link-btn" onClick={() => void removeKey(k.id).then(loadKeys).then(setKeys)}>Remove</button>
+              </span>
+            ) : (
+              <button className="link-btn" onClick={() => { setOpen(open === k.id ? null : k.id); setMsg(null); setValue(''); }}>
+                {open === k.id ? 'Cancel' : 'Add key'}
+              </button>
+            )}
+          </div>
+          {open === k.id ? (
+            <form className="key-form" onSubmit={(e) => { e.preventDefault(); void save(k.id); }}>
+              <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder={`${k.name} API key`}
+                aria-label={`${k.name} API key`} autoComplete="off" spellCheck={false} autoFocus />
+              <button type="submit" disabled={busy || value.trim().length < 10}>{busy ? 'Checking…' : 'Connect'}</button>
+            </form>
+          ) : null}
+          {open === k.id ? <p className="set-note">Get it at <a href={k.url} target="_blank" rel="noreferrer">{k.where}</a>.</p> : null}
+        </div>
+      ))}
+      {msg ? <p className={`set-status ${msg.ok ? 'ok' : 'warn'}`}>{msg.text}</p> : null}
+    </section>
+  );
+}
+
 const ENGINES: { id: VoiceEngine; label: string; title: string }[] = [
-  { id: 'auto', label: 'Auto', title: 'The best voice available: Sarvam once its key is saved, else Leo on NVIDIA, else Edge' },
+  { id: 'auto', label: 'Auto', title: 'The best voice available: Jarvis on Fish Audio or Sarvam once a key is saved, else Leo on NVIDIA, else Edge' },
+  { id: 'fish', label: 'Jarvis', title: 'Fish Audio: a Jarvis voice from its voice library (your key)' },
   { id: 'sarvam', label: 'Sarvam', title: 'Sarvam AI: Indian voices for Hindi, English and Hinglish (your key)' },
   { id: 'edge', label: 'Edge', title: 'Microsoft Edge voices: free, no key or account' },
   { id: 'nvidia', label: 'NVIDIA', title: 'Leo on NVIDIA: streamed, starts talking in ~0.3 s' },
@@ -16,7 +75,7 @@ const ENGINES: { id: VoiceEngine; label: string; title: string }[] = [
   { id: 'local', label: 'Offline', title: 'On this laptop, no internet (~350 MB of memory while it talks)' },
 ];
 const ENGINE_NAMES: Record<string, string> = {
-  sarvam: 'Sarvam AI', nvidia: 'Leo on NVIDIA', edge: 'Microsoft Edge', elevenlabs: 'ElevenLabs', local: 'the offline voice', none: 'nobody (text only)',
+  fish: 'Jarvis on Fish Audio', sarvam: 'Sarvam AI', nvidia: 'Leo on NVIDIA', edge: 'Microsoft Edge', elevenlabs: 'ElevenLabs', local: 'the offline voice', none: 'nobody (text only)',
 };
 const EDGE_NAMES: Record<string, string> = {
   'hi-IN-MadhurNeural': 'Madhur · Hindi · male',
@@ -60,6 +119,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [key, setKey] = useState('');
   const [sarvamKey, setSarvamKey] = useState('');
+  const [fishKey, setFishKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cleared, setCleared] = useState<string | null>(null);
@@ -71,6 +131,14 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     setEleven(r.eleven);
     setLive(r.live ?? null);
     if (r.eleven.configured) setVoices(await elevenVoices());
+  };
+
+  const connectFish = async () => {
+    setBusy(true);
+    setError(await saveFishKey(fishKey));
+    setBusy(false);
+    setFishKey('');
+    await refresh();
   };
 
   const connectSarvam = async () => {
@@ -163,6 +231,40 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
                       </select>
                     </label>
                     <button className="link-btn" onClick={() => void removeSarvamKey().then(refresh)}>Remove Sarvam key</button>
+                  </>
+                )
+              ) : null}
+
+              {settings.voice_engine === 'fish' || (settings.voice_engine === 'auto' && !live.fish?.configured) ? (
+                !live.fish?.configured ? (
+                  <>
+                    <p className="set-note">
+                      Jarvis on Fish Audio: a composed, cinematic assistant voice. Paste your Fish Audio API key
+                      (<a href="https://fish.audio/app/api-keys" target="_blank" rel="noreferrer">fish.audio → API keys</a>). It's
+                      checked with Fish Audio and kept in Windows Credential Manager; PLAG never shows it again.
+                    </p>
+                    <form className="key-form" onSubmit={(e) => { e.preventDefault(); void connectFish(); }}>
+                      <input type="password" value={fishKey} onChange={(e) => setFishKey(e.target.value)} placeholder="Fish Audio API key"
+                        aria-label="Fish Audio API key" autoComplete="off" spellCheck={false} />
+                      <button type="submit" disabled={busy || fishKey.trim().length < 10}>{busy ? 'Checking…' : 'Connect'}</button>
+                    </form>
+                  </>
+                ) : (
+                  <>
+                    <p className={`set-status ${live.fish.usable ? 'ok' : 'warn'}`}>
+                      Fish Audio {live.fish.usable ? `connected · ${live.fish.voice_name || 'Jarvis voice'}` : `paused (${live.fish.error ?? 'error'}) · the next voice speaks for now`}
+                    </p>
+                    <form className="set-row" onSubmit={(e) => {
+                      e.preventDefault();
+                      const v = (new FormData(e.currentTarget).get('fishvoice') as string) ?? '';
+                      void change({ fish_voice_id: v.trim() });
+                    }}>
+                      <span>Voice ID (from a fish.audio voice page's address; empty = the most used Jarvis voice)</span>
+                      <input className="city" name="fishvoice" key={settings.fish_voice_id} defaultValue={settings.fish_voice_id}
+                        placeholder="auto: Jarvis" aria-label="Fish Audio voice ID" autoComplete="off" spellCheck={false}
+                        onBlur={(e) => e.target.value.trim() !== settings.fish_voice_id && void change({ fish_voice_id: e.target.value.trim() })} />
+                    </form>
+                    <button className="link-btn" onClick={() => void removeFishKey().then(refresh)}>Remove Fish Audio key</button>
                   </>
                 )
               ) : null}
@@ -326,6 +428,70 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           </section>
         ) : null}
+
+        {settings ? (
+          <section className="set-sec">
+            <h3>Inbox agent</h3>
+            <p className="set-note">
+              New messages on the accounts you connect (Connections → Your accounts) and in Gmail show up in the Inbox tab,
+              each with a reply PLAG drafted. PLAG never sends them: you copy the reply and send it yourself. To draft, the
+              message goes to the AI that writes the reply.
+            </p>
+            <label className="set-row">
+              <span>Watch my accounts for new messages</span>
+              <input type="checkbox" checked={settings.inbox_agent} onChange={(e) => void change({ inbox_agent: e.target.checked })} />
+            </label>
+            <label className="set-row">
+              <span>Draft a reply for each new message</span>
+              <input type="checkbox" checked={settings.inbox_draft} onChange={(e) => void change({ inbox_draft: e.target.checked })} />
+            </label>
+            <label className="set-row">
+              <span>Tell me about new messages out loud</span>
+              <input type="checkbox" checked={settings.inbox_announce} onChange={(e) => void change({ inbox_announce: e.target.checked })} />
+            </label>
+            <form className="set-row" onSubmit={(e) => {
+              e.preventDefault();
+              const v = (new FormData(e.currentTarget).get('owner') as string) ?? '';
+              void change({ inbox_owner: v.trim() });
+            }}>
+              <span>Your name, for replies written as you</span>
+              <input className="city" name="owner" key={settings.inbox_owner} defaultValue={settings.inbox_owner} placeholder="e.g. Parthiv"
+                aria-label="Your name" autoComplete="off" spellCheck={false}
+                onBlur={(e) => e.target.value.trim() !== settings.inbox_owner && void change({ inbox_owner: e.target.value.trim() })} />
+            </form>
+          </section>
+        ) : null}
+
+        {settings ? (
+          <section className="set-sec">
+            <h3>Computer use</h3>
+            <p className="set-note">
+              PLAG can finish a job in your own apps by clicking and typing, reading each window through Windows'
+              accessibility interface. It stops the moment you move the mouse, switch windows or press Esc, and it asks
+              before anything risky (delete, send, pay, uninstall). It never types into a password box, and never drives
+              terminals, the registry editor, Windows Settings or sign-in windows.
+            </p>
+            <label className="set-row">
+              <span>Let PLAG click and type in my apps</span>
+              <input type="checkbox" checked={settings.computer_use}
+                onChange={(e) => void change({ computer_use: e.target.checked })} />
+            </label>
+            {settings.computer_use ? (
+              <form className="set-row" onSubmit={(e) => {
+                e.preventDefault();
+                const v = (new FormData(e.currentTarget).get('apps') as string) ?? '';
+                void change({ computer_apps: v.trim() });
+              }}>
+                <span>Only these apps (leave empty for any app it's allowed to touch)</span>
+                <input className="city" name="apps" key={settings.computer_apps} defaultValue={settings.computer_apps}
+                  placeholder="notepad.exe, winword.exe, excel.exe" aria-label="Allowed apps" autoComplete="off" spellCheck={false}
+                  onBlur={(e) => e.target.value.trim() !== settings.computer_apps && void change({ computer_apps: e.target.value.trim() })} />
+              </form>
+            ) : null}
+          </section>
+        ) : null}
+
+        <KeysSection />
 
         <section className="set-sec">
           <h3>Memory and storage</h3>

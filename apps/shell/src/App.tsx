@@ -4,6 +4,7 @@ import { ConnectionsPanel, ConversationPanel, HaltOverlay, NowPanel, VitalsPanel
 import Stage from './components/Stage';
 import TitleBar from './components/TitleBar';
 import { call, openEvents } from './lib/core';
+import { onInboxNew, refreshInbox, watchAccounts } from './lib/inbox';
 import {
   finishListening, haltPlag, loadSettings, onAck, onModel3dReady, onPlagSay, onReminder, onVoiceStop, onWake, refreshMemory,
   refreshReminders, setWake,
@@ -31,6 +32,8 @@ export default function App() {
           else if (e.topic === 'task.ack') onAck(e.data);
           else if (e.topic === 'memory.changed') void refreshMemory();
           else if (e.topic === 'reminders.changed') void refreshReminders();
+          else if (e.topic === 'inbox.changed') void refreshInbox();
+          else if (e.topic === 'inbox.new') void onInboxNew(e.data);
           else useStore.getState().handleEvent(e);
         },
         (up) => {
@@ -39,12 +42,16 @@ export default function App() {
             void syncWake();
             void refreshMemory();
             void refreshReminders();
+            void refreshInbox();
             void loadSettings(); // listening speed for the mic
           }
         },
       ),
     [],
   );
+
+  // connected accounts live in the desktop shell (their signed-in sessions); the list follows it
+  useEffect(() => watchAccounts(), []);
 
   // signals from the desktop shell: Ctrl+Space and the kill switch work from any app
   useEffect(() => {

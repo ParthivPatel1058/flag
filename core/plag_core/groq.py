@@ -15,6 +15,10 @@ from .gemini import ProviderError
 from .secrets import get_secret
 
 URL = "https://api.groq.com/openai/v1/chat/completions"
+STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+STT_MODEL = "whisper-large-v3"  # Groq's most accurate Whisper (multilingual: English, Hindi, Hinglish)
+# spellings Whisper should know (it takes a short style prompt)
+STT_PROMPT = "PLAG, WhatsApp, YouTube, Gmail, LinkedIn, Instagram, Cal.com. Hinglish: bhej do, kholo, chalao, yaad dilana."
 MODEL = "llama-3.3-70b-versatile"
 
 
@@ -79,6 +83,30 @@ class Groq:
         self.health = {"ok": True, "ms": ms, "at": time.time(), "error": None}
         self._fails = 0
         return f"groq {MODEL}", obj, ms
+
+
+    async def transcribe(self, wav: bytes, language: str | None = None) -> str:
+        """What was said in `wav`, by Whisper Large V3 on Groq (Hindi comes back as Hinglish in Latin letters).
+        Raises ProviderError; the caller then tries the next hearing."""
+        key = self.key()
+        if not key or not self.ready():
+            raise ProviderError("Groq is resting or has no key", "unavailable")
+        data = {"model": STT_MODEL, "response_format": "json", "temperature": "0", "prompt": STT_PROMPT}
+        if language in ("en", "hi"):
+            data["language"] = language
+        t0 = time.perf_counter()
+        try:
+            r = await self._http.post(STT_URL, headers={"Authorization": f"Bearer {key}"}, data=data,
+                                      files={"file": ("speech.wav", wav, "audio/wav")})
+        except httpx.HTTPError as e:
+            self._failed("offline", t0)
+            raise ProviderError("Groq hearing unreachable", "offline") from e
+        if r.status_code != 200:
+            self._failed(str(r.status_code), t0)
+            raise ProviderError(f"Groq hearing HTTP {r.status_code}", r.status_code)
+        from .hinglish import to_latin
+        self.health = {"ok": True, "ms": int((time.perf_counter() - t0) * 1000), "at": time.time(), "error": None}
+        return to_latin((r.json().get("text") or "").strip())
 
 
 groq = Groq()

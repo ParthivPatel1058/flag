@@ -2,6 +2,7 @@
 Stored in %LOCALAPPDATA%\\PLAG\\settings.json. API keys never go here; they live in Windows Credential Manager."""
 
 import json
+import re
 import threading
 
 from .config import DATA_DIR
@@ -32,9 +33,18 @@ DEFAULTS = {
     "voice_engine": "auto",
     "sarvam_speaker": "shubh",               # Sarvam Bulbul v3 voice
     "edge_voice": "hi-IN-MadhurNeural",      # Microsoft Edge voice (free, no key)
+    "fish_voice_id": "",                     # Fish Audio voice model id; empty = the most used "Jarvis" voice, found once
+    # Inbox agent (inbox.py): new messages from the accounts you connected, each with a reply PLAG drafts (never sends)
+    "inbox_agent": True,                     # watch connected accounts and Gmail for new messages
+    "inbox_draft": True,                     # draft a reply for each (the message goes to the AI to write it)
+    "inbox_announce": True,                  # say new messages out loud (always shown in the Inbox tab)
+    # Computer use (deskagent.py): PLAG clicking and typing in your apps to finish a job you asked for
+    "computer_use": False,                   # off until you turn it on
+    "computer_apps": "",                     # apps it may drive, comma-separated ("notepad.exe, winword.exe"); empty = any app but the blocked ones
+    "inbox_owner": "",                       # your name, so drafts are signed and written as you
     "v": 2,                                  # settings version, for moving old defaults forward once
 }
-VOICE_ENGINES = ("auto", "sarvam", "nvidia", "edge", "elevenlabs", "local")
+VOICE_ENGINES = ("auto", "fish", "sarvam", "nvidia", "edge", "elevenlabs", "local")
 # Sarvam Bulbul v3 voices (docs.sarvam.ai, 2026-09-25), men first: the rest are women
 SARVAM_SPEAKERS = ("shubh", "aditya", "rahul", "rohan", "amit", "dev", "ratan", "varun", "manan", "sumit", "kabir", "aayan",
                    "ashutosh", "advait", "anand", "tarun", "sunny", "mani", "gokul", "vijay", "mohit", "rehan", "soham",
@@ -83,7 +93,13 @@ def update(changes: dict) -> dict:
             value = min(1000, max(40, value))
         if key == "eleven_reserve_pct":
             value = min(50, max(0, value))
-        if key == "home_city":
+        if key == "fish_voice_id":
+            value = value.strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{0,64}", value):
+                continue  # a voice id is letters and digits (from the voice page's address)
+        if key == "computer_apps":
+            value = ", ".join(sorted({a.strip().lower()[:40] for a in value.split(",") if a.strip()}))[:400]
+        if key in ("home_city", "inbox_owner"):
             value = " ".join(value.split())[:60]
         current[key] = value
     with _lock:

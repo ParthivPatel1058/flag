@@ -478,6 +478,8 @@ async function handleResult(res: TurnResult, ctrl: AbortController, spoken = fal
     return;
   }
   if (client?.type === 'image' && client.id) await showImage(client.id, client.prompt ?? '');
+  if (client?.type === 'inbox') useStore.getState().setTab('inbox');
+  if (client?.type === 'copy' && client.text) void navigator.clipboard.writeText(client.text).catch(() => undefined); // a booking link // "any new messages?": the Inbox tab
   if (client?.type === 'draft_saved' && client.id) markSaved(client.id); // "save": the card shows it's kept
   if (client?.type === 'route' && client.steps) startNav(client as unknown as RouteClient);
   await ackPlaying?.catch(() => undefined); // let "On it." finish before the result
@@ -846,9 +848,16 @@ export interface Settings {
   voice_engine: VoiceEngine;
   sarvam_speaker: string;
   edge_voice: string;
+  fish_voice_id: string; // Fish Audio voice model; empty = the most used "Jarvis" voice
+  inbox_agent: boolean; // watch connected accounts and Gmail for new messages
+  inbox_draft: boolean; // draft a reply for each (never sent)
+  inbox_announce: boolean; // say new messages out loud
+  inbox_owner: string; // your name, for drafts written as you
+  computer_use: boolean; // PLAG may click and type in your apps
+  computer_apps: string; // the apps it may drive (comma-separated); empty = any but the blocked ones
 }
 
-export type VoiceEngine = 'auto' | 'sarvam' | 'nvidia' | 'edge' | 'elevenlabs' | 'local';
+export type VoiceEngine = 'auto' | 'fish' | 'sarvam' | 'nvidia' | 'edge' | 'elevenlabs' | 'local';
 /** What the core can do right now, and who speaks first. */
 export interface Live {
   hear: boolean;
@@ -856,6 +865,7 @@ export interface Live {
   agent: boolean;
   voice: VoiceEngine | 'none';
   sarvam: { configured: boolean; usable: boolean; error: string | null; speaker: string; speakers: string[] };
+  fish?: { configured: boolean; usable: boolean; error: string | null; voice_id: string; voice_name: string };
   nvidia: { configured: boolean; usable: boolean };
   edge: { available: boolean; usable: boolean; voices: string[] };
 }
@@ -1117,6 +1127,47 @@ export async function saveSarvamKey(key: string): Promise<string | null> {
   } catch (e) {
     return e instanceof CoreError ? e.message : String(e);
   }
+}
+
+export async function saveFishKey(key: string): Promise<string | null> {
+  try {
+    await call('/v1/fish/key', { json: { key } });
+    await loadSettings(); // Auto switches to the Jarvis voice right away
+    return null;
+  } catch (e) {
+    return e instanceof CoreError ? e.message : String(e);
+  }
+}
+
+export async function removeFishKey(): Promise<void> {
+  await call('/v1/fish/key', { method: 'DELETE' }).catch(() => undefined);
+  await loadSettings();
+}
+
+// ---------------------------------------------------------------- optional keys (Settings → Keys)
+
+export type KeyService = 'tinyfish' | 'calcom' | 'tavily' | 'groq';
+
+export async function loadKeys(): Promise<Record<KeyService, boolean> | null> {
+  try {
+    return (await call<{ keys: Record<KeyService, boolean> }>('/v1/keys')).keys;
+  } catch {
+    return null;
+  }
+}
+
+/** Checked with the service, then kept in Windows Credential Manager. Returns an error message, or null. */
+export async function saveKey(service: KeyService, key: string): Promise<string | null> {
+  try {
+    await call(`/v1/keys/${service}`, { json: { key } });
+    return null;
+  } catch (e) {
+    return e instanceof CoreError ? e.message : String(e);
+  }
+}
+
+export async function removeKey(service: KeyService): Promise<void> {
+  await call(`/v1/keys/${service}`, { method: 'DELETE' }).catch(() => undefined);
 }
 
 export async function removeSarvamKey(): Promise<void> {

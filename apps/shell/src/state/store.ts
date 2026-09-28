@@ -55,7 +55,7 @@ export interface Connector {
 }
 export interface Approval {
   id: string;
-  kind: 'whatsapp';
+  kind: 'whatsapp' | 'calendar' | 'computer';
   name: string;
   phone_tail: string;
   message: string;
@@ -75,6 +75,7 @@ export interface TurnResult {
     hours?: number[]; variable?: string; label?: string; // a weather simulation's maps
     title?: string; kind?: string; summary?: string; words?: number; sources?: number; // a PDF PLAG wrote
     steps?: RouteStep[]; // directions (the rest of RouteView comes with them)
+    text?: string; // copy: a booking link put on the clipboard
   } | null;
   vision?: { label: string; confidence: string } | null;
   sources?: { title: string; url: string; site: string }[]; // Wikipedia and news links behind an answer
@@ -99,7 +100,37 @@ export interface Reminder {
   text: string;
   due: string; // local ISO time
 }
-export type Tab = 'conversation' | 'memory' | 'reminders';
+export type Tab = 'conversation' | 'inbox' | 'memory' | 'reminders';
+/** An account you connected by its address: you signed in on the real site; PLAG watches it for new messages. */
+export interface Account {
+  id: string;
+  name: string; // "LinkedIn"
+  host: string; // "linkedin.com"
+  service: string;
+  color: string;
+  url: string;
+  watch: boolean;
+  state: 'starting' | 'signin' | 'watching' | 'paused' | 'offline' | 'limit';
+  unread: number;
+  added: string;
+}
+/** A new message on one of your accounts, with the reply PLAG drafted (you send it). */
+export interface InboxItem {
+  id: string;
+  account: string; // an Account id, or "google" for Gmail through the Google connection
+  service: string;
+  service_name: string;
+  sender: string;
+  subject: string;
+  text: string;
+  url: string;
+  kind: 'message' | 'code' | 'count';
+  summary: string;
+  reply: string;
+  urgency: 'low' | 'normal' | 'high';
+  status: 'new' | 'done' | 'dismissed';
+  created: string;
+}
 export interface GenImage {
   id: string;
   prompt: string;
@@ -207,6 +238,8 @@ export interface PlagState {
   messages: Msg[];
   memories: Memory[];
   reminders: Reminder[];
+  inbox: InboxItem[];
+  accounts: Account[];
   tab: Tab;
   image: GenImage | null;
   model3d: Model3D | null;
@@ -244,6 +277,8 @@ export interface PlagState {
   note(text: string, meta: string, lang?: string): void;
   setMemories(m: Memory[]): void;
   setReminders(r: Reminder[]): void;
+  setInbox(i: InboxItem[]): void;
+  setAccounts(a: Account[]): void;
   setTab(t: Tab): void;
   setImage(i: GenImage | null): void;
   setModel3d(m: Model3D | null): void;
@@ -301,6 +336,8 @@ export const useStore = create<PlagState>()((set, get) => ({
   messages: [],
   memories: [],
   reminders: [],
+  inbox: [],
+  accounts: [],
   tab: 'conversation',
   image: null,
   model3d: null,
@@ -483,6 +520,8 @@ export const useStore = create<PlagState>()((set, get) => ({
     })),
   setMemories: (memories) => set({ memories }),
   setReminders: (reminders) => set({ reminders }),
+  setInbox: (inbox) => set({ inbox }),
+  setAccounts: (accounts) => set({ accounts }),
   setTab: (tab) => set({ tab }),
   // steps measured here, not in the core (how soon PLAG's voice started)
   addStep: (st) => set((s) => (s.task ? { task: { ...s.task, steps: upsertStep(s.task.steps, st) } } : {})),

@@ -20,7 +20,11 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__, approvals, whatsapp
-from . import documents, drafts, imagegen, location, model3d, navigation, weather
+from . import documents, drafts, imagegen, inbox, location, model3d, navigation, weather
+from .websearch import websearch
+from .tinyfish import TinyFishError, tinyfish
+from .calcom import CalError, calcom
+from .secrets import delete_secret, get_secret, set_secret
 from . import memory as mem
 from . import settings as app_settings
 from .elevenlabs import REALTIME_ERRORS, ElevenError, eleven
@@ -30,10 +34,12 @@ from .audit import audit
 from .bus import bus
 from .config import MODELS, TTS_CACHE_DIR, VOICE
 from .gemini import ProviderError, gemini
+from .groq import groq
 from .nvidia import nvidia
 from .edgevoice import EdgeError, edgevoice
 from .nvasr import NAME as NV_HEARING, nvhearing
 from .sarvam import SarvamError, sarvam
+from .fishaudio import FishError, fishaudio
 from .nvspeech import RATE as NV_RATE, NvSpeechError, nvspeech
 from .policy import Halted, policy
 from .system import sampler
@@ -105,6 +111,8 @@ def _eleven_can_speak(text: str) -> bool:
 
 def _voice_ready(engine: str, text: str) -> bool:
     """Can this voice speak now? Looked up without loading anything (the offline voice is ~350 MB once loaded)."""
+    if engine == "fish":
+        return fishaudio.usable()
     if engine == "sarvam":
         return sarvam.usable()
     if engine == "nvidia":
@@ -119,7 +127,7 @@ def _voice_ready(engine: str, text: str) -> bool:
 def _voice_order(text: str = "Okay.") -> list[str]:
     """Who speaks, in order: the voice chosen in Settings first, the others as backups. Auto: Sarvam when its key is
     saved, Leo on NVIDIA, Edge (free, no key), your ElevenLabs voice, then the offline voice."""
-    order = [e for e in ("sarvam", "nvidia", "edge", "elevenlabs", "local") if _voice_ready(e, text)]
+    order = [e for e in ("fish", "sarvam", "nvidia", "edge", "elevenlabs", "local") if _voice_ready(e, text)]
     choice = app_settings.get()["voice_engine"]
     if choice in order:
         order.remove(choice)
@@ -173,6 +181,8 @@ async def _nvidia_stream(text: str, mood: str) -> Response | None:
 
 
 IDLE_S = 600  # a model nobody used for 10 minutes gives its memory back
+# when a cloud hearing does the work (NVIDIA Parakeet or Groq Whisper), the bigger local model is freed much sooner
+IDLE_S_HEARD_IN_CLOUD = 120
 
 
 async def _idle_loop() -> None:
@@ -180,7 +190,8 @@ async def _idle_loop() -> None:
     while True:
         await asyncio.sleep(60)
         try:
-            freed = await asyncio.to_thread(wake_mod.unload_idle, IDLE_S)
+            cloud_ears = nvhearing.usable() or groq.ready()
+            freed = await asyncio.to_thread(wake_mod.unload_idle, IDLE_S_HEARD_IN_CLOUD if cloud_ears else IDLE_S)
             if _eleven_speaks() and await asyncio.to_thread(local_voice.unload_idle, IDLE_S):
                 freed.append("kokoro")
             if freed:
@@ -216,7 +227,7 @@ async def _warm_voice() -> None:
     """ "Yes sir?" in PLAG's voice now (saved on disk: made only once per voice), and NVIDIA's hearing connected, so
     the first "PLAG" and the first reply aren't slower (the first NVIDIA reply was ~4 s cold). Never with ElevenLabs:
     that would spend your credits at every start."""
-    if (_voice_order() or ["none"])[0] in ("nvidia", "sarvam", "edge"):
+    if (_voice_order() or ["none"])[0] in ("fish", "nvidia", "sarvam", "edge"):
         for line in ("Yes sir?", "जी सर?"):
             with contextlib.suppress(Exception):
                 await tts(SpeakRequest(text=line, mood="calm"))
@@ -228,7 +239,8 @@ async def _warm_voice() -> None:
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     tasks = [asyncio.create_task(_metrics_loop()), asyncio.create_task(_parent_watchdog()),
-             asyncio.create_task(_reminder_loop()), asyncio.create_task(_idle_loop())]
+             asyncio.create_task(_reminder_loop()), asyncio.create_task(_idle_loop()),
+             asyncio.create_task(inbox.worker()), asyncio.create_task(inbox.gmail_poller())]
     audit("core.start", version=__version__)
     if wake_mod.available():  # warm the listening model so the first "PLAG" is quick
         threading.Thread(target=wake_mod.model, daemon=True).start()
@@ -272,7 +284,7 @@ app.add_middleware(CORSMiddleware, allow_origin_regex=ORIGIN_RE.pattern, allow_m
 
 # ---------------------------------------------------------------- helpers
 
-VOICE_NAMES = {"sarvam": "Sarvam AI", "nvidia": "Leo on NVIDIA (streamed)", "edge": "Microsoft Edge (free)",
+VOICE_NAMES = {"fish": "Jarvis on Fish Audio", "sarvam": "Sarvam AI", "nvidia": "Leo on NVIDIA (streamed)", "edge": "Microsoft Edge (free)",
                "elevenlabs": "ElevenLabs", "local": "Offline voice (Kokoro)"}
 
 
@@ -292,6 +304,18 @@ def voice_row() -> dict:
             "detail": detail}
 
 
+def fish_row() -> dict:
+    if not fishaudio.configured():
+        state, detail = "off", "No key · add it in Settings → Voice for the Jarvis voice"
+    elif not fishaudio.usable():
+        state, detail = "degraded", f"Paused after an error ({fishaudio.last_error}) · the next voice speaks"
+    else:
+        vid = app_settings.get()["fish_voice_id"]
+        name = fishaudio.voice_name or ("voice " + vid[:8] if vid else "Jarvis, found on first use")
+        state, detail = ("online" if fishaudio.health else "ready"), f"{name} · model s1"
+    return {"id": "fish", "name": "Fish Audio", "role": "Jarvis voice", "state": state, "detail": detail}
+
+
 def sarvam_row() -> dict:
     if not sarvam.configured():
         state, detail = "off", "No key · add it in Settings → Voice to use Sarvam's Indian voices"
@@ -305,14 +329,29 @@ def sarvam_row() -> dict:
 def glm_row() -> dict:
     h = nvidia.health
     if not nvidia.ready():
-        state, detail = ("off", "No NVIDIA key saved") if not nvidia._keys() else ("degraded", "Both models resting after errors · back in 5 min")
+        state, detail = ("off", "No NVIDIA key saved") if not nvidia._keys() else ("degraded", "All models resting after errors · back in 5 min")
     elif h and h["ok"]:
         state, detail = "online", f"Last answer: {h['model'].split('/')[-1]} · {h['ms'] / 1000:.1f} s"
     elif h:
         state, detail = "degraded", f"{h['model'].split('/')[-1]}: {h['error']} · still racing"
     else:
-        state, detail = "ready", "gpt-oss-20b + mistral-nemotron race Gemini on every question"
+        names = {"z-ai/glm-5.3-flash": "GLM 5.3 Flash", "meta/muse-glimmer-30b": "Muse"}
+        state, detail = "ready", " + ".join(names.get(m, m.split("/")[-1]) for m in nvidia.models()) + " race Gemini on every question"
     return {"id": "nvidia", "name": "NVIDIA open models", "role": "Race Gemini", "state": state, "detail": detail}
+
+
+def groq_row() -> dict:
+    from .groq import groq
+    h = groq.health
+    if not groq.key():
+        state, detail = "off", "No key · Settings → Keys → Groq: the fastest answers, and Whisper hearing (free)"
+    elif not groq.ready():
+        state, detail = "degraded", "Resting after errors · other brains still answer"
+    elif h and h.get("ok"):
+        state, detail = "online", f"Llama 3.3 70B + Whisper Large V3 · {h['ms'] / 1000:.1f} s"
+    else:
+        state, detail = "ready", "Fastest answers + best hearing (Whisper Large V3)"
+    return {"id": "groq", "name": "Groq", "role": "Fast brain and hearing", "state": state, "detail": detail}
 
 
 def eleven_row() -> dict:
@@ -400,6 +439,71 @@ def google_row() -> dict:
             "detail": detail, "action": "disconnect" if g["connected"] else "connect"}
 
 
+def inbox_row() -> dict:
+    s = app_settings.get()
+    if not s["inbox_agent"]:
+        return {"id": "inbox", "name": "Inbox agent", "role": "Drafts replies to new messages", "state": "off",
+                "detail": "Turned off in Settings"}
+    try:
+        new = inbox.items(60, status="new")
+    except Exception:
+        new = []
+    drafted = sum(1 for i in new if i["reply"])
+    detail = (f"{len(new)} new · {drafted} replies drafted · you send them" if new else
+              "Watching your connected accounts · drafts replies, never sends")
+    return {"id": "inbox", "name": "Inbox agent", "role": "Drafts replies to new messages", "state": "online" if new else "ready",
+            "detail": detail}
+
+
+def tinyfish_row() -> dict:
+    h = tinyfish.health
+    if not tinyfish.key():
+        state, detail = "off", "No key · Settings → Keys → TinyFish: web search, page reading and a web agent"
+    elif not tinyfish.ready():
+        state, detail = "degraded", f"Paused after an error ({tinyfish.last_error}) · Wikipedia and news still work"
+    elif h and h["ok"]:
+        state, detail = "online", f"Last {h.get('what', 'search')} · {h['ms'] / 1000:.1f} s · search is free, the web agent uses credits"
+    else:
+        state, detail = "ready", "Search and page reading for answers; the web agent for tasks on websites"
+    return {"id": "tinyfish", "name": "TinyFish", "role": "Web search and web agent", "state": state, "detail": detail}
+
+
+def computer_row() -> dict:
+    st = app_settings.get()
+    if not st.get("computer_use"):
+        state, detail = "off", "Off · Settings → Computer use lets PLAG click and type in your apps"
+    else:
+        apps = st.get("computer_apps") or ""
+        where = apps if apps else "any app except terminals, Settings and password windows"
+        state, detail = "ready", f"On · {where[:70]} · asks before anything risky"
+    return {"id": "computer", "name": "Computer use", "role": "Works in your apps", "state": state, "detail": detail}
+
+
+def calcom_row() -> dict:
+    if not calcom.configured():
+        state, detail = "off", "No key · Settings → Keys → Cal.com: meetings, free slots, booking by voice"
+    elif calcom.last_error and calcom.last_error != "not_found":
+        state, detail = "degraded", f"Last request failed ({calcom.last_error})"
+    else:
+        me = calcom._me[0] if calcom._me else None
+        who = f"cal.com/{me['username']}" if me and me.get("username") else "Connected"
+        state, detail = ("online" if calcom.health else "ready"), f"{who} · booking, cancelling and moving ask you first"
+    return {"id": "calcom", "name": "Cal.com", "role": "Meetings and booking", "state": state, "detail": detail}
+
+
+def websearch_row() -> dict:
+    h = websearch.health
+    if not websearch.key():
+        state, detail = "off", "Optional · add PLAG / tavily_api_key for web results in answers and the autopilot"
+    elif not websearch.ready():
+        state, detail = "degraded", "Tavily refused the key or the monthly limit is used · Wikipedia and news still work"
+    elif h and h["ok"]:
+        state, detail = "online", f"Tavily · {h['ms'] / 1000:.1f} s"
+    else:
+        state, detail = "ready", "Tavily · used by “who is…”, “look up…” and the autopilot"
+    return {"id": "websearch", "name": "Web search", "role": "Real web results", "state": state, "detail": detail}
+
+
 def connectors() -> list[dict]:
     def latest(models: list[str]) -> tuple[str, dict] | None:
         seen = [(m, gemini.health[m]) for m in models if m in gemini.health]
@@ -434,15 +538,21 @@ def connectors() -> list[dict]:
         {"id": "whatsapp", "name": "WhatsApp", "role": "Send messages by voice", "state": wa_state, "detail": wa_detail},
         {"id": "voice", "name": "Natural voice", "role": f"Gemini speech · {VOICE}", "state": voice_state, "detail": voice_detail},
         voice_row(),
+        fish_row(),
         sarvam_row(),
         eleven_row(),
         glm_row(),
+        groq_row(),
         image_row(),
         model3d_row(),
         weather_row(),
         location_row(),
         google_row(),
-        {"id": "linkedin", "name": "LinkedIn", "role": "Sign in and post", "state": "planned", "detail": "Connects in phase 12"},
+        inbox_row(),
+        calcom_row(),
+        tinyfish_row(),
+        computer_row(),
+        websearch_row(),
     ]
 
 
@@ -508,6 +618,21 @@ class GoogleClientRequest(BaseModel):
 class Decision(BaseModel):
     approve: bool
     lang: str = "auto"
+
+
+class InboxEvent(BaseModel):
+    """A new message the desktop shell saw on a connected account (the site's own notification or unread count)."""
+    account: str = Field(min_length=1, max_length=60)
+    service_url: str = Field(min_length=3, max_length=300)
+    title: str = Field(default="", max_length=300)
+    body: str = Field(default="", max_length=4000)
+    url: str = Field(default="", max_length=600)
+    kind: str = Field(default="message", pattern=r"^(message|count)$")
+    count: int = Field(default=0, ge=0, le=100000)
+
+
+class Redraft(BaseModel):
+    instruction: str = Field(default="", max_length=300)  # "say yes, 5 pm works", "decline politely"
 
 
 class VisionRequest(BaseModel):
@@ -750,7 +875,9 @@ async def tts(req: SpeakRequest):
         return JSONResponse({"error": "halted"}, status_code=423)
     for engine in _voice_order(req.text):
         try:
-            if engine == "sarvam":  # Indian voices; cached phrases are free
+            if engine == "fish":  # Jarvis on Fish Audio; cached phrases are free
+                audio, kind = await fishaudio.speak(req.text, req.mood), "audio/mpeg"
+            elif engine == "sarvam":  # Indian voices; cached phrases are free
                 audio, kind = await sarvam.speak(req.text, req.mood), "audio/wav"
             elif engine == "nvidia":  # Leo, ~0.6 s a phrase
                 audio, kind = await asyncio.to_thread(nvspeech.speak, req.text, req.mood), "audio/wav"
@@ -761,7 +888,7 @@ async def tts(req: SpeakRequest):
             else:  # offline, on this laptop
                 audio, kind = await asyncio.to_thread(local_voice.speak, req.text, req.mood), "audio/wav"
             return Response(audio, media_type=kind, headers={"X-PLAG-Voice": {"nvidia": "nvidia-magpie", "local": "kokoro"}.get(engine, engine)})
-        except (SarvamError, NvSpeechError, EdgeError, ElevenError) as e:
+        except (FishError, SarvamError, NvSpeechError, EdgeError, ElevenError) as e:
             log.info("%s voice unavailable (%s); trying the next voice", engine, e.code)
         except Exception:
             log.exception("%s voice failed; trying the next voice", engine)
@@ -770,6 +897,62 @@ async def tts(req: SpeakRequest):
     except ProviderError as e:
         return JSONResponse({"error": str(e.code), "message": str(e), "tried": e.tried}, status_code=503)
     return Response(wav, media_type="audio/wav", headers={"X-PLAG-Cache": "hit" if cached else "miss"})
+
+
+# ---------------------------------------------------------------- the left panel's sections (weather, news)
+
+_panel: dict[str, tuple[float, dict]] = {}  # answers kept a while: the panel asks again whenever you open its tab
+
+
+async def _cached(name: str, seconds: float, make):
+    hit = _panel.get(name)
+    if hit and time.time() - hit[0] < seconds:
+        return hit[1]
+    out = await make()
+    _panel[name] = (time.time(), out)
+    return out
+
+
+@app.get("/v1/panel/weather")
+async def panel_weather(city: str = ""):
+    """Today and tomorrow where you are (or your city from Settings), for the Weather tab."""
+    async def make():
+        want = " ".join((city or app_settings.get()["home_city"]).split())[:60]
+        here = None
+        if not want and location.enabled():
+            try:
+                here = await location.place()
+            except location.LocationError:
+                here = None
+        if not want and not here:
+            return {"error": "no_city", "message": "Tell PLAG your city in Settings, or turn on Location."}
+        try:
+            f = await (weather.forecast(want) if want else
+                       weather.forecast(lat=here["lat"], lon=here["lon"], name=here.get("city") or "your location"))
+        except weather.WeatherError as e:
+            return {"error": e.code, "message": str(e)}
+        sky, _hi, _mx = weather.describe(f["now"]["code"])
+        days = []
+        for d in f["days"][:3]:
+            s_en, _h, _m = weather.describe(d["code"])
+            days.append({"date": d["date"], "high": d["high"], "low": d["low"], "rain": d["rain"], "sky": s_en})
+        return {"place": f["place"], "now": {**f["now"], "sky": sky}, "days": days}
+    return await _cached(f"weather:{city}", 600, make)
+
+
+@app.get("/v1/panel/news")
+async def panel_news(topic: str = ""):
+    """Headlines for the News tab (the same sources PLAG's reports use)."""
+    from .research import ResearchError, _news
+
+    async def make():
+        try:
+            items = await _news(topic.strip()[:80] or "top news in India")
+        except ResearchError as e:
+            return {"error": e.code, "message": str(e), "items": []}
+        return {"items": [{"title": i["title"], "source": i["source"], "link": i["link"], "date": i["date"]}
+                          for i in items[:8]]}
+    return await _cached(f"news:{topic}", 900, make)
 
 
 @app.get("/v1/location/now")
@@ -821,7 +1004,7 @@ def _live() -> dict:
             "stream": bool(order) and order[0] in ("nvidia", "elevenlabs"),
             "agent": s["voice_agent"] and eleven.configured() and eleven.usable(),
             "voice": order[0] if order else "none",
-            "sarvam": sarvam.status(), "nvidia": {"configured": nvspeech.configured(), "usable": nvspeech.usable()},
+            "fish": fishaudio.status(), "sarvam": sarvam.status(), "nvidia": {"configured": nvspeech.configured(), "usable": nvspeech.usable()},
             "edge": {"available": edgevoice.available(), "usable": edgevoice.usable(), "voices": list(app_settings.EDGE_VOICES)}}
 
 
@@ -832,6 +1015,74 @@ async def settings_get():
 
 class SarvamKeyRequest(BaseModel):
     key: str = Field(min_length=10, max_length=200)
+
+
+# ---------------------------------------------------------------- keys saved from Settings → Keys
+
+KEYS_FROM_SETTINGS = {"tinyfish": "tinyfish_api_key", "calcom": "calcom_api_key", "tavily": "tavily_api_key", "groq": "groq_api_key"}
+
+
+class KeyRequest(BaseModel):
+    key: str = Field(min_length=10, max_length=300)
+
+
+@app.get("/v1/keys")
+async def keys_status():
+    """Which optional keys are saved (never the keys themselves)."""
+    return {"keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()}}
+
+
+@app.post("/v1/keys/{service}")
+async def keys_save(service: str, req: KeyRequest):
+    """Check a key with its service, then keep it in Windows Credential Manager. It's never returned or logged."""
+    name = KEYS_FROM_SETTINGS.get(service)
+    if not name:
+        return JSONResponse({"error": "unknown", "message": "Unknown service."}, status_code=404)
+    key = req.key.strip()
+    try:
+        if service == "tinyfish":
+            await tinyfish.check_key(key)
+        elif service == "calcom":
+            if not key.startswith("cal_"):
+                return JSONResponse({"error": "bad_key", "message": "A Cal.com key starts with cal_live_ (Settings → Security)."}, status_code=422)
+            await calcom.check_key(key)
+    except (TinyFishError, CalError) as e:
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+    await asyncio.to_thread(set_secret, name, key)
+    audit("key.saved", service=service)
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"ok": True, "keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()}}
+
+
+@app.delete("/v1/keys/{service}")
+async def keys_remove(service: str):
+    name = KEYS_FROM_SETTINGS.get(service)
+    if not name:
+        return JSONResponse({"error": "unknown"}, status_code=404)
+    await asyncio.to_thread(delete_secret, name)
+    audit("key.removed", service=service)
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"ok": True}
+
+
+@app.post("/v1/fish/key")
+async def fish_key(req: SarvamKeyRequest):
+    """Your Fish Audio key goes to Windows Credential Manager once Fish Audio accepts it; never returned or logged."""
+    try:
+        status = await fishaudio.save_key(req.key)
+    except FishError as e:
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+    audit("fish.connected")
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"fish": status, "live": _live()}
+
+
+@app.delete("/v1/fish/key")
+async def fish_key_remove():
+    fishaudio.remove_key()
+    audit("fish.disconnected")
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"fish": fishaudio.status(), "live": _live()}
 
 
 @app.post("/v1/sarvam/key")
@@ -946,6 +1197,64 @@ async def google_callback(state: str = "", code: str = "", error: str = ""):
     return Response(_PAGE.format(color="#D6F24B", title="PLAG is connected to Google",
                                  body=f"{esc(email)} · read-only email and calendar. You can close this tab."),
                     media_type="text/html")
+
+
+# ---------------------------------------------------------------- inbox agent
+
+def _inbox_out(item: dict) -> dict:
+    """One message for the dashboard: security codes stay masked."""
+    if item.get("kind") == "code":
+        return {**item, "text": inbox.mask_codes(item["text"]), "subject": inbox.mask_codes(item["subject"])}
+    return item
+
+
+@app.post("/v1/inbox/event")
+async def inbox_event(ev: InboxEvent):
+    if policy.halted or not app_settings.get()["inbox_agent"]:
+        return {"ok": False, "stored": False}
+    if ev.kind == "count":
+        # only an unread count changed (the site didn't say who wrote): one line, no draft
+        item = inbox.add(account=ev.account, service_url=ev.service_url, title="", sender="New activity",
+                         body=f"{ev.count} unread" + (f" · {ev.title[:120]}" if ev.title else ""), url=ev.url, kind="count")
+    else:
+        item = inbox.add(account=ev.account, service_url=ev.service_url, title=ev.title, body=ev.body, url=ev.url)
+    if item is None:
+        return {"ok": True, "stored": False}
+    if item["kind"] == "count":
+        await asyncio.to_thread(inbox.set_summary, item["id"], f"{ev.count} unread on {item['service_name']}.")
+        bus.publish("inbox.changed", {})
+    else:
+        inbox.submit(item)
+    return {"ok": True, "stored": True, "id": item["id"]}
+
+
+@app.get("/v1/inbox")
+async def inbox_list():
+    rows = await asyncio.to_thread(inbox.items, 40)
+    return {"items": [_inbox_out(i) for i in rows]}
+
+
+@app.post("/v1/inbox/{item_id}/redraft")
+async def inbox_redraft(item_id: str, req: Redraft):
+    item = await asyncio.to_thread(inbox.get, item_id)
+    if item is None:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    out = await inbox.draft(item, req.instruction)
+    bus.publish("inbox.changed", {})
+    return {"ok": True, "reply": out["reply"], "summary": out["summary"]}
+
+
+@app.post("/v1/inbox/{item_id}/done")
+async def inbox_done(item_id: str):
+    """You sent the reply (or dealt with it): it leaves the "new" list."""
+    ok = await asyncio.to_thread(inbox.set_status, item_id, "done")
+    return {"ok": ok}
+
+
+@app.delete("/v1/inbox/{item_id}")
+async def inbox_dismiss(item_id: str):
+    ok = await asyncio.to_thread(inbox.set_status, item_id, "dismissed")
+    return {"ok": ok}
 
 
 @app.get("/v1/memory")

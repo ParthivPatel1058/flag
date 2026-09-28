@@ -11,7 +11,7 @@ import HeroOrb from './HeroOrb';
 import NavView from './NavView';
 import {
   AttachIcon, CameraIcon, CloseIcon, DocIcon, FolderIcon, KeyboardIcon, ListenIcon, MicIcon, OpenIcon, PauseIcon, PlayIcon,
-  SendIcon, StopSquare, WhatsAppIcon,
+  CalendarIcon, SendIcon, StopSquare, WhatsAppIcon,
 } from './icons';
 
 type Picture = { jpeg: string; url: string; name: string };
@@ -104,19 +104,19 @@ function ApprovalCard() {
   }, [a]);
   if (!a) return null;
   return (
-    <div className="approval" role="dialog" aria-label={`Send WhatsApp message to ${a.name}`}>
+    <div className="approval" role="dialog" aria-label={a.kind === 'calendar' ? a.name : `Send WhatsApp message to ${a.name}`}>
       <div className="ap-head">
-        <WhatsAppIcon />
-        <span>WhatsApp to <b>{a.name}</b></span>
-        <span className="ap-tail mono">••{a.phone_tail}</span>
+        {a.kind === 'calendar' ? <CalendarIcon /> : a.kind === 'computer' ? <KeyboardIcon /> : <WhatsAppIcon />}
+        {a.kind === 'whatsapp' ? <span>WhatsApp to <b>{a.name}</b></span> : <span><b>{a.name}</b></span>}
+        {a.phone_tail ? <span className="ap-tail mono">••{a.phone_tail}</span> : null}
       </div>
       <p className="ap-msg">{a.message}</p>
       <div className="ap-actions">
         <button className="ap-cancel" onClick={() => void decideApproval(false)}>Cancel</button>
-        <button className="ap-send" onClick={() => void decideApproval(true)} autoFocus>Send</button>
+        <button className="ap-send" onClick={() => void decideApproval(true)} autoFocus>{a.kind === 'whatsapp' ? 'Send' : 'Confirm'}</button>
       </div>
       <div className="ap-timer" aria-hidden="true"><i style={{ transform: `scaleX(${left})` }} /></div>
-      <p className="ap-hint">{listening ? 'Listening… say “send” or “bhej do”, or “cancel”' : 'Or say “PLAG, send it”'}</p>
+      <p className="ap-hint">{listening ? 'Listening… say “yes” or “haan”, or “cancel”' : a.kind === 'whatsapp' ? 'Or say “PLAG, send it”' : 'Or say “PLAG, yes”'}</p>
     </div>
   );
 }

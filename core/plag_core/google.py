@@ -172,7 +172,7 @@ class Google:
         return r.json()
 
     async def emails(self, kind: str = "important", limit: int = 8, search: str = "") -> list[dict]:
-        """Emails as {from, subject, snippet, date, unread}: important from the last day, unread in the inbox, or
+        """Emails as {id, from, subject, snippet, date, unread}: important from the last day, unread in the inbox, or
         what a Gmail search finds (`kind="search"`, Gmail's own search syntax works, e.g. "from:rahul")."""
         query = search if kind == "search" else {"unread": "is:unread in:inbox newer_than:3d",
                                                  "today": "in:inbox newer_than:1d"}.get(kind, "is:important newer_than:1d")
@@ -184,7 +184,7 @@ class Google:
             headers = {h["name"].lower(): h["value"] for h in meta.get("payload", {}).get("headers", [])}
             sender = headers.get("from", "")
             name = re.sub(r'\s*<[^>]+>\s*$', "", sender).strip('" ') or sender
-            out.append({"from": name[:60], "subject": (headers.get("subject") or "(no subject)")[:120],
+            out.append({"id": m["id"], "from": name[:60], "subject": (headers.get("subject") or "(no subject)")[:120],
                         "snippet": (meta.get("snippet") or "")[:200], "unread": "UNREAD" in meta.get("labelIds", []),
                         "date": datetime.fromtimestamp(int(meta.get("internalDate", "0")) / 1000).isoformat(timespec="minutes")})
         return out

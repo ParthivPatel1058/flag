@@ -19,5 +19,12 @@ contextBridge.exposeInMainWorld('plag', {
   reveal: () => ipcRenderer.send('plag:reveal'),
   notify: (title, body) => ipcRenderer.send('plag:notify', String(title).slice(0, 64), String(body).slice(0, 240)),
   pickGoogleClient: () => ipcRenderer.invoke('plag:pick-google-client'),
+  // connected accounts: you sign in on the real site in a PLAG window; PLAG watches for new messages, never sends
+  accounts: () => ipcRenderer.invoke('plag:accounts'),
+  addAccount: (url) => ipcRenderer.invoke('plag:account-add', String(url).slice(0, 300)),
+  openAccount: (id, url) => ipcRenderer.invoke('plag:account-open', String(id), url ? String(url).slice(0, 600) : undefined),
+  watchAccount: (id, on) => ipcRenderer.invoke('plag:account-watch', String(id), Boolean(on)),
+  removeAccount: (id) => ipcRenderer.invoke('plag:account-remove', String(id)),
+  onAccounts: (fn) => listen('plag:accounts', fn),
   platform: process.platform,
 });
