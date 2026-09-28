@@ -155,6 +155,7 @@ after `PLAG /`):
 | `nvidia_image_api_key`, `nvidia_trellis_api_key`, `nvidia_weather_api_key` | Images, 3D models, the weather simulation | build.nvidia.com |
 | `groq_api_key` | Llama 3.3 70B on Groq: usually the fastest answer of all | console.groq.com (free) |
 | `tavily_api_key` | Real web results for answers and the autopilot | tavily.com (1,000 free a month) |
+| `fishaudio_api_key` | The **Jarvis voice** on Fish Audio, PLAG's first voice once saved (Settings → Voice → Jarvis) | fish.audio → API keys |
 | `sarvam_api_key` | Indian voices (Settings → Voice) | dashboard.sarvam.ai |
 | `elevenlabs_api_key` | Your own voice and realtime hearing (Settings → ElevenLabs) | elevenlabs.io |
 | `olamaps_api_key` | Directions with live traffic in India | maps.olakrutrim.com |

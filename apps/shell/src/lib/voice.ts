@@ -847,13 +847,14 @@ export interface Settings {
   voice_engine: VoiceEngine;
   sarvam_speaker: string;
   edge_voice: string;
+  fish_voice_id: string; // Fish Audio voice model; empty = the most used "Jarvis" voice
   inbox_agent: boolean; // watch connected accounts and Gmail for new messages
   inbox_draft: boolean; // draft a reply for each (never sent)
   inbox_announce: boolean; // say new messages out loud
   inbox_owner: string; // your name, for drafts written as you
 }
 
-export type VoiceEngine = 'auto' | 'sarvam' | 'nvidia' | 'edge' | 'elevenlabs' | 'local';
+export type VoiceEngine = 'auto' | 'fish' | 'sarvam' | 'nvidia' | 'edge' | 'elevenlabs' | 'local';
 /** What the core can do right now, and who speaks first. */
 export interface Live {
   hear: boolean;
@@ -861,6 +862,7 @@ export interface Live {
   agent: boolean;
   voice: VoiceEngine | 'none';
   sarvam: { configured: boolean; usable: boolean; error: string | null; speaker: string; speakers: string[] };
+  fish?: { configured: boolean; usable: boolean; error: string | null; voice_id: string; voice_name: string };
   nvidia: { configured: boolean; usable: boolean };
   edge: { available: boolean; usable: boolean; voices: string[] };
 }
@@ -1122,6 +1124,21 @@ export async function saveSarvamKey(key: string): Promise<string | null> {
   } catch (e) {
     return e instanceof CoreError ? e.message : String(e);
   }
+}
+
+export async function saveFishKey(key: string): Promise<string | null> {
+  try {
+    await call('/v1/fish/key', { json: { key } });
+    await loadSettings(); // Auto switches to the Jarvis voice right away
+    return null;
+  } catch (e) {
+    return e instanceof CoreError ? e.message : String(e);
+  }
+}
+
+export async function removeFishKey(): Promise<void> {
+  await call('/v1/fish/key', { method: 'DELETE' }).catch(() => undefined);
+  await loadSettings();
 }
 
 export async function removeSarvamKey(): Promise<void> {

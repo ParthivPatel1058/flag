@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  clearCaches, elevenVoices, loadSettings, removeElevenKey, removeSarvamKey, saveElevenKey, saveSarvamKey, saveSettings,
+  clearCaches, elevenVoices, loadSettings, removeElevenKey, removeFishKey, removeSarvamKey, saveElevenKey, saveFishKey, saveSarvamKey,
+  saveSettings,
   type ElevenStatus, type Live, type Settings, type VoiceEngine,
 } from '../lib/voice';
 import { CloseIcon } from './icons';
@@ -8,7 +9,8 @@ import { CloseIcon } from './icons';
 type Voice = { id: string; name: string; category: string };
 
 const ENGINES: { id: VoiceEngine; label: string; title: string }[] = [
-  { id: 'auto', label: 'Auto', title: 'The best voice available: Sarvam once its key is saved, else Leo on NVIDIA, else Edge' },
+  { id: 'auto', label: 'Auto', title: 'The best voice available: Jarvis on Fish Audio or Sarvam once a key is saved, else Leo on NVIDIA, else Edge' },
+  { id: 'fish', label: 'Jarvis', title: 'Fish Audio: a Jarvis voice from its voice library (your key)' },
   { id: 'sarvam', label: 'Sarvam', title: 'Sarvam AI: Indian voices for Hindi, English and Hinglish (your key)' },
   { id: 'edge', label: 'Edge', title: 'Microsoft Edge voices: free, no key or account' },
   { id: 'nvidia', label: 'NVIDIA', title: 'Leo on NVIDIA: streamed, starts talking in ~0.3 s' },
@@ -16,7 +18,7 @@ const ENGINES: { id: VoiceEngine; label: string; title: string }[] = [
   { id: 'local', label: 'Offline', title: 'On this laptop, no internet (~350 MB of memory while it talks)' },
 ];
 const ENGINE_NAMES: Record<string, string> = {
-  sarvam: 'Sarvam AI', nvidia: 'Leo on NVIDIA', edge: 'Microsoft Edge', elevenlabs: 'ElevenLabs', local: 'the offline voice', none: 'nobody (text only)',
+  fish: 'Jarvis on Fish Audio', sarvam: 'Sarvam AI', nvidia: 'Leo on NVIDIA', edge: 'Microsoft Edge', elevenlabs: 'ElevenLabs', local: 'the offline voice', none: 'nobody (text only)',
 };
 const EDGE_NAMES: Record<string, string> = {
   'hi-IN-MadhurNeural': 'Madhur · Hindi · male',
@@ -60,6 +62,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [key, setKey] = useState('');
   const [sarvamKey, setSarvamKey] = useState('');
+  const [fishKey, setFishKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cleared, setCleared] = useState<string | null>(null);
@@ -71,6 +74,14 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     setEleven(r.eleven);
     setLive(r.live ?? null);
     if (r.eleven.configured) setVoices(await elevenVoices());
+  };
+
+  const connectFish = async () => {
+    setBusy(true);
+    setError(await saveFishKey(fishKey));
+    setBusy(false);
+    setFishKey('');
+    await refresh();
   };
 
   const connectSarvam = async () => {
@@ -163,6 +174,40 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
                       </select>
                     </label>
                     <button className="link-btn" onClick={() => void removeSarvamKey().then(refresh)}>Remove Sarvam key</button>
+                  </>
+                )
+              ) : null}
+
+              {settings.voice_engine === 'fish' || (settings.voice_engine === 'auto' && !live.fish?.configured) ? (
+                !live.fish?.configured ? (
+                  <>
+                    <p className="set-note">
+                      Jarvis on Fish Audio: a composed, cinematic assistant voice. Paste your Fish Audio API key
+                      (<a href="https://fish.audio/app/api-keys" target="_blank" rel="noreferrer">fish.audio → API keys</a>). It's
+                      checked with Fish Audio and kept in Windows Credential Manager; PLAG never shows it again.
+                    </p>
+                    <form className="key-form" onSubmit={(e) => { e.preventDefault(); void connectFish(); }}>
+                      <input type="password" value={fishKey} onChange={(e) => setFishKey(e.target.value)} placeholder="Fish Audio API key"
+                        aria-label="Fish Audio API key" autoComplete="off" spellCheck={false} />
+                      <button type="submit" disabled={busy || fishKey.trim().length < 10}>{busy ? 'Checking…' : 'Connect'}</button>
+                    </form>
+                  </>
+                ) : (
+                  <>
+                    <p className={`set-status ${live.fish.usable ? 'ok' : 'warn'}`}>
+                      Fish Audio {live.fish.usable ? `connected · ${live.fish.voice_name || 'Jarvis voice'}` : `paused (${live.fish.error ?? 'error'}) · the next voice speaks for now`}
+                    </p>
+                    <form className="set-row" onSubmit={(e) => {
+                      e.preventDefault();
+                      const v = (new FormData(e.currentTarget).get('fishvoice') as string) ?? '';
+                      void change({ fish_voice_id: v.trim() });
+                    }}>
+                      <span>Voice ID (from a fish.audio voice page's address; empty = the most used Jarvis voice)</span>
+                      <input className="city" name="fishvoice" key={settings.fish_voice_id} defaultValue={settings.fish_voice_id}
+                        placeholder="auto: Jarvis" aria-label="Fish Audio voice ID" autoComplete="off" spellCheck={false}
+                        onBlur={(e) => e.target.value.trim() !== settings.fish_voice_id && void change({ fish_voice_id: e.target.value.trim() })} />
+                    </form>
+                    <button className="link-btn" onClick={() => void removeFishKey().then(refresh)}>Remove Fish Audio key</button>
                   </>
                 )
               ) : null}

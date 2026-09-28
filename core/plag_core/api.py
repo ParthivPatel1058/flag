@@ -35,6 +35,7 @@ from .nvidia import nvidia
 from .edgevoice import EdgeError, edgevoice
 from .nvasr import NAME as NV_HEARING, nvhearing
 from .sarvam import SarvamError, sarvam
+from .fishaudio import FishError, fishaudio
 from .nvspeech import RATE as NV_RATE, NvSpeechError, nvspeech
 from .policy import Halted, policy
 from .system import sampler
@@ -106,6 +107,8 @@ def _eleven_can_speak(text: str) -> bool:
 
 def _voice_ready(engine: str, text: str) -> bool:
     """Can this voice speak now? Looked up without loading anything (the offline voice is ~350 MB once loaded)."""
+    if engine == "fish":
+        return fishaudio.usable()
     if engine == "sarvam":
         return sarvam.usable()
     if engine == "nvidia":
@@ -120,7 +123,7 @@ def _voice_ready(engine: str, text: str) -> bool:
 def _voice_order(text: str = "Okay.") -> list[str]:
     """Who speaks, in order: the voice chosen in Settings first, the others as backups. Auto: Sarvam when its key is
     saved, Leo on NVIDIA, Edge (free, no key), your ElevenLabs voice, then the offline voice."""
-    order = [e for e in ("sarvam", "nvidia", "edge", "elevenlabs", "local") if _voice_ready(e, text)]
+    order = [e for e in ("fish", "sarvam", "nvidia", "edge", "elevenlabs", "local") if _voice_ready(e, text)]
     choice = app_settings.get()["voice_engine"]
     if choice in order:
         order.remove(choice)
@@ -217,7 +220,7 @@ async def _warm_voice() -> None:
     """ "Yes sir?" in PLAG's voice now (saved on disk: made only once per voice), and NVIDIA's hearing connected, so
     the first "PLAG" and the first reply aren't slower (the first NVIDIA reply was ~4 s cold). Never with ElevenLabs:
     that would spend your credits at every start."""
-    if (_voice_order() or ["none"])[0] in ("nvidia", "sarvam", "edge"):
+    if (_voice_order() or ["none"])[0] in ("fish", "nvidia", "sarvam", "edge"):
         for line in ("Yes sir?", "जी सर?"):
             with contextlib.suppress(Exception):
                 await tts(SpeakRequest(text=line, mood="calm"))
@@ -274,7 +277,7 @@ app.add_middleware(CORSMiddleware, allow_origin_regex=ORIGIN_RE.pattern, allow_m
 
 # ---------------------------------------------------------------- helpers
 
-VOICE_NAMES = {"sarvam": "Sarvam AI", "nvidia": "Leo on NVIDIA (streamed)", "edge": "Microsoft Edge (free)",
+VOICE_NAMES = {"fish": "Jarvis on Fish Audio", "sarvam": "Sarvam AI", "nvidia": "Leo on NVIDIA (streamed)", "edge": "Microsoft Edge (free)",
                "elevenlabs": "ElevenLabs", "local": "Offline voice (Kokoro)"}
 
 
@@ -292,6 +295,18 @@ def voice_row() -> dict:
         detail += f" · {VOICE_NAMES.get(chosen, chosen)} isn't available right now"
     return {"id": "voice_engine", "name": "Voice", "role": "Speaks PLAG's replies", "state": "online" if chosen in ("auto", first) else "degraded",
             "detail": detail}
+
+
+def fish_row() -> dict:
+    if not fishaudio.configured():
+        state, detail = "off", "No key · add it in Settings → Voice for the Jarvis voice"
+    elif not fishaudio.usable():
+        state, detail = "degraded", f"Paused after an error ({fishaudio.last_error}) · the next voice speaks"
+    else:
+        vid = app_settings.get()["fish_voice_id"]
+        name = fishaudio.voice_name or ("voice " + vid[:8] if vid else "Jarvis, found on first use")
+        state, detail = ("online" if fishaudio.health else "ready"), f"{name} · model s1"
+    return {"id": "fish", "name": "Fish Audio", "role": "Jarvis voice", "state": state, "detail": detail}
 
 
 def sarvam_row() -> dict:
@@ -466,6 +481,7 @@ def connectors() -> list[dict]:
         {"id": "whatsapp", "name": "WhatsApp", "role": "Send messages by voice", "state": wa_state, "detail": wa_detail},
         {"id": "voice", "name": "Natural voice", "role": f"Gemini speech · {VOICE}", "state": voice_state, "detail": voice_detail},
         voice_row(),
+        fish_row(),
         sarvam_row(),
         eleven_row(),
         glm_row(),
@@ -798,7 +814,9 @@ async def tts(req: SpeakRequest):
         return JSONResponse({"error": "halted"}, status_code=423)
     for engine in _voice_order(req.text):
         try:
-            if engine == "sarvam":  # Indian voices; cached phrases are free
+            if engine == "fish":  # Jarvis on Fish Audio; cached phrases are free
+                audio, kind = await fishaudio.speak(req.text, req.mood), "audio/mpeg"
+            elif engine == "sarvam":  # Indian voices; cached phrases are free
                 audio, kind = await sarvam.speak(req.text, req.mood), "audio/wav"
             elif engine == "nvidia":  # Leo, ~0.6 s a phrase
                 audio, kind = await asyncio.to_thread(nvspeech.speak, req.text, req.mood), "audio/wav"
@@ -809,7 +827,7 @@ async def tts(req: SpeakRequest):
             else:  # offline, on this laptop
                 audio, kind = await asyncio.to_thread(local_voice.speak, req.text, req.mood), "audio/wav"
             return Response(audio, media_type=kind, headers={"X-PLAG-Voice": {"nvidia": "nvidia-magpie", "local": "kokoro"}.get(engine, engine)})
-        except (SarvamError, NvSpeechError, EdgeError, ElevenError) as e:
+        except (FishError, SarvamError, NvSpeechError, EdgeError, ElevenError) as e:
             log.info("%s voice unavailable (%s); trying the next voice", engine, e.code)
         except Exception:
             log.exception("%s voice failed; trying the next voice", engine)
@@ -869,7 +887,7 @@ def _live() -> dict:
             "stream": bool(order) and order[0] in ("nvidia", "elevenlabs"),
             "agent": s["voice_agent"] and eleven.configured() and eleven.usable(),
             "voice": order[0] if order else "none",
-            "sarvam": sarvam.status(), "nvidia": {"configured": nvspeech.configured(), "usable": nvspeech.usable()},
+            "fish": fishaudio.status(), "sarvam": sarvam.status(), "nvidia": {"configured": nvspeech.configured(), "usable": nvspeech.usable()},
             "edge": {"available": edgevoice.available(), "usable": edgevoice.usable(), "voices": list(app_settings.EDGE_VOICES)}}
 
 
@@ -880,6 +898,26 @@ async def settings_get():
 
 class SarvamKeyRequest(BaseModel):
     key: str = Field(min_length=10, max_length=200)
+
+
+@app.post("/v1/fish/key")
+async def fish_key(req: SarvamKeyRequest):
+    """Your Fish Audio key goes to Windows Credential Manager once Fish Audio accepts it; never returned or logged."""
+    try:
+        status = await fishaudio.save_key(req.key)
+    except FishError as e:
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+    audit("fish.connected")
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"fish": status, "live": _live()}
+
+
+@app.delete("/v1/fish/key")
+async def fish_key_remove():
+    fishaudio.remove_key()
+    audit("fish.disconnected")
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"fish": fishaudio.status(), "live": _live()}
 
 
 @app.post("/v1/sarvam/key")
