@@ -21,7 +21,7 @@ from . import memory as mem
 from .google import GoogleError, google
 from pathlib import Path
 
-from . import documents, drafts, files, imagegen, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
+from . import documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
 from . import settings as app_settings
 from .elevenlabs import ElevenError, eleven
 from .imagegen import ImageError
@@ -47,7 +47,8 @@ IMAGE_ACTIONS = ["generate_image", "imagine_camera"]
 CREATIVE_ACTIONS = ["generate_3d", "weather", "weather_sim", "where", "write",  # TRELLIS, forecast, FourCastNet, location, writing
                     "open_file", "open_folder", "list_files", "lookup",  # your files, and Wikipedia + news
                     "save_draft",  # keep the PDF or 3D model PLAG just made (they're drafts until you say "save")
-                    "navigate", "save_place"]  # directions on a live map, and places saved by name ("home")
+                    "navigate", "save_place",  # directions on a live map, and places saved by name ("home")
+                    "inbox_check", "inbox_reply"]  # new messages on your connected accounts, and drafting a reply
 ACTIONS = ["none", "open_url", "open_app", "web_search", "play_youtube", "system_status", "whatsapp_send",
            "whatsapp_call", "whatsapp_open", "gmail_search", "research", "camera_look", "screen_look", "ui", *MEMORY_ACTIONS,
            *GOOGLE_ACTIONS, *IMAGE_ACTIONS, *CREATIVE_ACTIONS]
@@ -219,6 +220,13 @@ Return JSON for every user turn:
     action.query is the place as they said it (a saved name like "home" or "office" works too). Leave reply empty.
   - "save_place": save a place under a name ("save this location as home" -> action.text "home", action.query "";
     "save India Gate as favourite" -> action.text "favourite", action.query "India Gate"). Leave reply empty.
+  - "inbox_check": new messages on the user's connected accounts (Gmail, LinkedIn, Instagram, X, anything they
+    connected in PLAG): "any new messages?", "what's in my inbox", "check my LinkedIn messages", "koi naya message?".
+    Leave reply empty.
+  - "inbox_reply": draft (never send) a reply to a message that came in on a connected account ("reply to Rahul's
+    LinkedIn message saying I'm interested", "Priya ko Instagram pe reply likho ki kal milte hain"). action.contact is
+    the sender's name, action.text how to answer (their words; empty to let PLAG decide). PLAG only drafts it: the user
+    sends it. Not for WhatsApp messages the user wants SENT (that's whatsapp_send). Leave reply empty.
   - "where": where the user is right now, their current location or address ("where am I", "mera address kya hai").
     PLAG reads it from Windows Location. action.text is "address" when they ask for the address. Leave reply empty.
   - "remember": the user asks you to remember something about them. action.text is the fact, written as a short
@@ -483,6 +491,10 @@ def _intent_from_action(a: dict, lang: str, reply: str) -> Intent:
         return Intent("research", {"topic": (a.get("text") or a.get("query")).strip()}, lang, "", "Research")
     elif kind == "whatsapp_open" and (a.get("contact") or "").strip():
         return Intent("whatsapp_open", {"contact": a["contact"].strip()}, lang, "", "WhatsApp")
+    elif kind == "inbox_check":
+        return Intent("inbox_check", {}, lang, "", "Inbox")
+    elif kind == "inbox_reply" and (a.get("contact") or "").strip():
+        return Intent("inbox_reply", {"contact": a["contact"].strip(), "text": (a.get("text") or "").strip()}, lang, "", "Inbox")
     elif kind == "calendar_check":
         return Intent("calendar_check", {"day": "tomorrow" if a.get("day") == "tomorrow" else "today"}, lang, "", "Calendar")
     elif kind == "remember" and (a.get("text") or "").strip():
@@ -614,7 +626,8 @@ def _action_label(intent: Intent) -> str:
             "open_file": f"Open file: {args.get('query', '')}", "open_folder": f"Open {args.get('folder', '')}",
             "list_files": f"List {args.get('folder', '')}", "lookup": f"Wikipedia + news: {args.get('query', '')}",
             "save_draft": "Save to Documents\\PLAG", "navigate": f"Directions to {args.get('place', '')}",
-            "save_place": f"Save a place as {args.get('label', '')}"}.get(a, "Act")
+            "save_place": f"Save a place as {args.get('label', '')}", "inbox_check": "Check your inbox",
+            "inbox_reply": f"Draft a reply to {args.get('contact', '')}"}.get(a, "Act")
 
 
 def _in_step(step, index: int, label: str):
@@ -1073,6 +1086,8 @@ class Agent:
             return await self._navigate(intent.args["place"], lang, task_id, step, out)
         if intent.action == "save_place":
             return await self._save_place(intent.args["label"], intent.args.get("place", ""), lang, task_id, step, out)
+        if intent.action in ("inbox_check", "inbox_reply"):
+            return await self._inbox(intent, lang, step, out)
         if intent.action == "lookup":
             return await self._lookup(intent.args["query"], intent.args.get("question") or intent.args["query"], lang,
                                       task_id, step, out)
@@ -1592,6 +1607,40 @@ class Agent:
         audit(f"files.{a}", ok=True)  # which file stays out of the log
         out["result"] = {"ok": True, "detail": detail, "state": "app_ready" if a != "list_files" else "done"}
         out["reply"] = reply
+        out["mood"] = "calm"
+        return out
+
+    async def _inbox(self, intent: Intent, lang: str, step, out: dict) -> dict:
+        """New messages on your connected accounts, or a reply drafted for one. PLAG drafts; you send."""
+        if intent.action == "inbox_check":
+            step("act", "running", "Reading your inbox")
+            out["reply"] = await asyncio.to_thread(inbox.summary_line, lang)
+            out["result"] = {"ok": True, "detail": "inbox read"}
+            out["client"] = {"type": "inbox"}
+            out["history_reply"] = "(read out the new messages in the inbox)"  # their words stay out of the AI's history
+            step("act", "done", "Inbox tab updated")
+            out["mood"] = "calm"
+            return out
+        who = intent.args["contact"]
+        step("act", "running", f"Finding {who}'s message and drafting a reply")
+        item = await asyncio.to_thread(inbox.find, who)
+        if item is None:
+            step("act", "failed", "no message from them")
+            out.update(result={"ok": False, "detail": "not found"}, mood="sorry", reply=_say(
+                lang, f"I don't have a recent message from {who} in your inbox, sir.", "",
+                f"Sir, inbox mein {who} ka koi naya message nahi hai."))
+            return out
+        d = await inbox.draft(item, intent.args.get("text", ""))
+        bus.publish("inbox.changed", {})
+        step("act", "done" if d["reply"] else "warn", f"{item['service_name']} · draft ready, not sent")
+        out["result"] = {"ok": bool(d["reply"]), "detail": "draft ready (not sent)"}
+        out["client"] = {"type": "inbox", "id": item["id"]}
+        out["reply"] = _say(lang, f"Here's a reply to {item['sender']} on {item['service_name']}: “{d['reply']}” It's in the Inbox "
+                                  f"tab: copy it, and I'll open the chat for you to send.", "",
+                            f"{item['sender']} ke liye {item['service_name']} pe reply ready hai: “{d['reply']}” Inbox tab mein "
+                            f"copy karke bhej dijiye.") if d["reply"] else _say(
+            lang, f"{item['sender']}'s message doesn't seem to need a reply, sir.", "", f"Sir, {item['sender']} ke message ko reply ki zaroorat nahi lagti.")
+        out["history_reply"] = f"(drafted a reply to {item['sender']} on {item['service_name']}; not sent)"
         out["mood"] = "calm"
         return out
 

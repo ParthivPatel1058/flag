@@ -478,6 +478,7 @@ async function handleResult(res: TurnResult, ctrl: AbortController, spoken = fal
     return;
   }
   if (client?.type === 'image' && client.id) await showImage(client.id, client.prompt ?? '');
+  if (client?.type === 'inbox') useStore.getState().setTab('inbox'); // "any new messages?": the Inbox tab
   if (client?.type === 'draft_saved' && client.id) markSaved(client.id); // "save": the card shows it's kept
   if (client?.type === 'route' && client.steps) startNav(client as unknown as RouteClient);
   await ackPlaying?.catch(() => undefined); // let "On it." finish before the result
@@ -846,6 +847,10 @@ export interface Settings {
   voice_engine: VoiceEngine;
   sarvam_speaker: string;
   edge_voice: string;
+  inbox_agent: boolean; // watch connected accounts and Gmail for new messages
+  inbox_draft: boolean; // draft a reply for each (never sent)
+  inbox_announce: boolean; // say new messages out loud
+  inbox_owner: string; // your name, for drafts written as you
 }
 
 export type VoiceEngine = 'auto' | 'sarvam' | 'nvidia' | 'edge' | 'elevenlabs' | 'local';

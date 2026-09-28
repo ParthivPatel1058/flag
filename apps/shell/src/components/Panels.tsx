@@ -1,10 +1,13 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
 import type { OrbState } from 'thinking-orbs';
 import { langTag, mb, pct, rate, secs } from '../lib/format';
 import { cancelReminder, connectGoogle, deleteMemory, disconnectGoogle, resumePlag, sendText } from '../lib/voice';
+import {
+  QUICK_SITES, addAccount, copyReply, dismiss, markDone, openAccount, openItem, pauseAccount, redraft, removeAccount,
+} from '../lib/inbox';
 import { TrashIcon } from './icons';
-import { useStore, type Connector } from '../state/store';
+import { useStore, type Account, type Connector, type InboxItem } from '../state/store';
 
 function Sparkline({ values, max, tone = 'lime' }: { values: number[]; max?: number; tone?: 'lime' | 'bone' | 'warn' }) {
   const gid = `g${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -189,8 +192,110 @@ function RemindersView() {
   );
 }
 
+function ago(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins} min`;
+  if (mins < 24 * 60) return `${Math.round(mins / 60)} h`;
+  return new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
+const SERVICE_COLOR: Record<string, string> = {
+  gmail: '#ea4335', linkedin: '#0a66c2', instagram: '#e1306c', x: '#e7e9ea', facebook: '#1877f2', outlook: '#0078d4',
+  whatsapp: '#25d366', telegram: '#2aabee', slack: '#e01e5a', discord: '#5865f2',
+};
+
+function Badge({ name, color }: { name: string; color?: string }) {
+  return (
+    <span className="svc" style={{ ['--svc' as string]: color ?? '#d6f24b' }} aria-hidden="true">
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/** One new message: who and what, PLAG's summary, and the reply it drafted (edit it, copy it, open the chat). */
+function InboxCard({ item }: { item: InboxItem }) {
+  const [reply, setReply] = useState(item.reply);
+  const [ask, setAsk] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => setReply(item.reply), [item.reply]);
+  const code = item.kind === 'code';
+  const onRedraft = async (instruction: string) => {
+    setBusy(true);
+    const r = await redraft(item, instruction);
+    if (r !== null) setReply(r);
+    setAsk('');
+    setBusy(false);
+  };
+  return (
+    <li className={`ibx u-${item.urgency} ${item.status !== 'new' ? 'is-done' : ''}`}>
+      <div className="ibx-top">
+        <Badge name={item.service_name} color={SERVICE_COLOR[item.service]} />
+        <span className="ibx-who">
+          <b>{item.sender}</b>
+          <span className="mono">{item.service_name} · {ago(item.created)}{item.urgency === 'high' ? ' · urgent' : ''}</span>
+        </span>
+        <button className="item-del" onClick={() => void dismiss(item)} aria-label={`Dismiss the message from ${item.sender}`} title="Dismiss">
+          <TrashIcon />
+        </button>
+      </div>
+      {item.summary ? <p className="ibx-sum">{item.summary}</p> : null}
+      {item.kind !== 'count' ? (
+        <button className="ibx-orig" onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? (item.subject ? `${item.subject} — ` : '') + item.text : `${open ? 'Hide' : 'Show'} the message`}
+        </button>
+      ) : null}
+      {code ? (
+        <p className="ibx-note">A security code or sign-in alert. PLAG doesn’t draft replies to these or read them out.</p>
+      ) : item.kind === 'count' ? null : (
+        <>
+          <label className="ibx-label" htmlFor={`r-${item.id}`}>
+            {reply ? 'PLAG’s draft · edit it, then copy and send it yourself' : 'No reply needed · or ask PLAG for one below'}
+          </label>
+          {reply ? (
+            <textarea id={`r-${item.id}`} className="ibx-reply" value={reply} onChange={(e) => setReply(e.target.value)}
+              rows={Math.min(7, Math.max(2, Math.ceil(reply.length / 52)))} spellCheck />
+          ) : null}
+          <form className="ibx-ask" onSubmit={(e) => { e.preventDefault(); void onRedraft(ask); }}>
+            <input value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="How should I answer? e.g. “yes, 5 pm works”"
+              aria-label="Tell PLAG how to answer" maxLength={300} />
+            <button type="submit" disabled={busy}>{busy ? 'Writing…' : reply ? 'Redraft' : 'Draft'}</button>
+          </form>
+        </>
+      )}
+      <div className="ibx-actions">
+        {reply && !code ? (
+          <button className="ibx-btn primary" onClick={() => void copyReply(item, reply).then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 1800); })}>
+            {copied ? 'Copied' : 'Copy reply'}
+          </button>
+        ) : null}
+        <button className="ibx-btn" onClick={() => void openItem(item)}>Open {item.service_name}</button>
+        {item.status === 'new' ? <button className="ibx-btn" onClick={() => void markDone(item)}>Done</button> : null}
+      </div>
+    </li>
+  );
+}
+
+function InboxView() {
+  const inbox = useStore((s) => s.inbox);
+  const accounts = useStore((s) => s.accounts);
+  if (!inbox.length) {
+    return (
+      <p className="empty">
+        {accounts.length
+          ? 'No new messages. When someone writes to you on a connected account, it shows up here with a reply PLAG drafted.'
+          : 'Connect Gmail, LinkedIn, Instagram or any site under Connections. New messages show up here with a reply PLAG drafted for you to send.'}
+      </p>
+    );
+  }
+  return <ul className="ibx-list">{inbox.map((i) => <InboxCard key={i.id} item={i} />)}</ul>;
+}
+
 const TABS = [
   { id: 'conversation', label: 'Conversation' },
+  { id: 'inbox', label: 'Inbox' },
   { id: 'memory', label: 'Memory' },
   { id: 'reminders', label: 'Reminders' },
 ] as const;
@@ -201,7 +306,8 @@ export function ConversationPanel() {
   const setTab = useStore((s) => s.setTab);
   const nMemories = useStore((s) => s.memories.length);
   const nReminders = useStore((s) => s.reminders.length);
-  const counts = { conversation: 0, memory: nMemories, reminders: nReminders };
+  const nInbox = useStore((s) => s.inbox.filter((i) => i.status === 'new').length);
+  const counts = { conversation: 0, inbox: nInbox, memory: nMemories, reminders: nReminders };
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
@@ -215,7 +321,7 @@ export function ConversationPanel() {
           </button>
         ))}
       </header>
-      {tab === 'memory' ? <MemoryView /> : tab === 'reminders' ? <RemindersView /> : (
+      {tab === 'memory' ? <MemoryView /> : tab === 'reminders' ? <RemindersView /> : tab === 'inbox' ? <InboxView /> : (
       <div className="convo-list">
         {messages.length ? (
           messages.map((m) => (
@@ -249,6 +355,85 @@ export function ConversationPanel() {
 
 const CONN_LABEL: Record<string, string> = { online: 'Online', ready: 'Ready', degraded: 'Trouble', off: 'Off', planned: 'Not yet' };
 
+const ACCOUNT_STATE: Record<Account['state'], [string, string]> = {
+  watching: ['online', 'Watching for new messages'],
+  starting: ['ready', 'Opening…'],
+  signin: ['degraded', 'Sign in needed'],
+  paused: ['off', 'Paused'],
+  offline: ['degraded', 'Can’t reach the site right now'],
+  limit: ['off', 'Paused: PLAG watches up to 6 accounts at once'],
+};
+
+/** Connect an account by its address: PLAG opens the real sign-in page; you sign in; it watches for new messages. */
+function AccountsBlock() {
+  const accounts = useStore((s) => s.accounts);
+  const [adding, setAdding] = useState(false);
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const connect = async (address: string) => {
+    setBusy(true);
+    setError(null);
+    const err = await addAccount(address);
+    setBusy(false);
+    if (err) setError(err);
+    else { setUrl(''); setAdding(false); }
+  };
+  return (
+    <div className="acct">
+      <div className="acct-h">
+        <h3 className="sub-h">Your accounts</h3>
+        <button className="conn-btn" onClick={() => { setAdding(!adding); setError(null); }} aria-expanded={adding}>
+          {adding ? 'Cancel' : '+ Connect'}
+        </button>
+      </div>
+      {adding ? (
+        <form className="acct-form" onSubmit={(e) => { e.preventDefault(); void connect(url); }}>
+          <label htmlFor="acct-url">Website address</label>
+          <div className="acct-row">
+            <input id="acct-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="linkedin.com" autoFocus
+              autoComplete="off" spellCheck={false} inputMode="url" />
+            <button type="submit" disabled={busy || !url.trim()}>Sign in</button>
+          </div>
+          <div className="acct-chips">
+            {QUICK_SITES.map((q) => (
+              <button type="button" key={q.url} disabled={busy} onClick={() => void connect(q.url)}>{q.label}</button>
+            ))}
+          </div>
+          {error ? <p className="set-status warn">{error}</p> : null}
+          <p className="acct-note">You sign in on the real site in a PLAG window; PLAG never sees your password. It reads new
+            messages and drafts replies. It never sends anything for you.</p>
+        </form>
+      ) : null}
+      {accounts.length ? (
+        <ul className="conn-list acct-list">
+          {accounts.map((a) => {
+            const [tone, label] = ACCOUNT_STATE[a.state] ?? ['ready', a.state];
+            return (
+              <li key={a.id} className={`conn c-${tone}`}>
+                <Badge name={a.name} color={a.color} />
+                <div className="conn-main">
+                  <span className="conn-name">{a.name}{a.unread ? <em className="acct-unread">{a.unread}</em> : null}</span>
+                  <span className="conn-detail">{a.host} · {label}</span>
+                </div>
+                <span className="acct-actions">
+                  <button className="conn-btn" onClick={() => void openAccount(a)}>{a.state === 'signin' ? 'Sign in' : 'Open'}</button>
+                  <button className="acct-mini" onClick={() => void pauseAccount(a)} title={a.watch ? 'Pause watching' : 'Resume watching'}
+                    aria-label={`${a.watch ? 'Pause' : 'Resume'} ${a.name}`}>{a.watch ? 'Ⅱ' : '▶'}</button>
+                  <button className="item-del" onClick={() => void removeAccount(a)} title="Disconnect and sign out"
+                    aria-label={`Disconnect ${a.name}`}><TrashIcon /></button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : !adding ? (
+        <p className="empty acct-empty">Connect Gmail, LinkedIn, Instagram or any site by its address.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function ConnectionsPanel() {
   const items = useStore((s) => s.connectors);
   const listening = useStore((s) => s.listening);
@@ -265,6 +450,8 @@ export function ConnectionsPanel() {
       <header className="panel-h">
         <h2 id="conns-h">Connections</h2>
       </header>
+      <AccountsBlock />
+      <h3 className="sub-h">PLAG</h3>
       <ul className="conn-list">
         {all.map((c) => (
           <li key={c.id} className={`conn c-${c.state}`}>

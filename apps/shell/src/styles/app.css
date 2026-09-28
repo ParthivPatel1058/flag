@@ -485,10 +485,10 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radi
 .link-btn:hover { color: var(--bad); }
 
 /* conversation / memory / reminders tabs */
-.panel-h.tabs { justify-content: flex-start; gap: 4px; }
+.panel-h.tabs { justify-content: flex-start; gap: 2px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
 .panel-h.tabs button {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ash-2);
-  padding: 3px 8px; border-radius: 6px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ash-2);
+  padding: 3px 7px; border-radius: 6px; white-space: nowrap;
 }
 .panel-h.tabs button.on { color: var(--bone); background: rgba(238, 239, 232, 0.07); }
 .panel-h.tabs button:focus-visible { outline: 1px solid var(--lime); outline-offset: 1px; }
@@ -499,6 +499,70 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radi
 .item-main .mono { font-size: 11px; color: var(--ash); }
 .item-del { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--ash-2); }
 .item-del:hover, .item-del:focus-visible { color: var(--bad); background: rgba(255, 90, 78, 0.1); }
+
+/* ------------------------------------------------------------------ accounts and the inbox agent */
+.conns { overflow-y: auto; padding-right: 10px; }
+.conns .conn-list { overflow: visible; margin-right: 0; padding-right: 0; }
+.acct-h { display: flex; justify-content: space-between; align-items: center; }
+.acct-h .sub-h { margin: 0; padding: 0; border: 0; }
+.acct { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.acct-empty { font-size: 12px; }
+.acct-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; border: 1px solid var(--line-2);
+  background: rgba(214, 242, 75, 0.03); animation: rise 0.18s ease-out; }
+.acct-form label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ash); }
+.acct-row { display: flex; gap: 6px; }
+.acct-row input, .ibx-ask input {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line-2);
+  background: rgba(0, 0, 0, 0.35); color: var(--bone); font: inherit; font-size: 13px; user-select: text;
+}
+.acct-row input:focus, .ibx-ask input:focus, .ibx-reply:focus { outline: none; border-color: rgba(214, 242, 75, 0.5); }
+.acct-row button, .ibx-ask button {
+  height: 32px; padding: 0 12px; border-radius: 9px; background: var(--lime); color: var(--lime-ink); font-weight: 600; font-size: 13px;
+}
+.acct-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.acct-chips button { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--bone-2); }
+.acct-chips button:hover:not(:disabled) { border-color: var(--lime); color: var(--lime); }
+.acct-note { font-size: 11.5px; line-height: 1.45; color: var(--ash); }
+.acct-list li { grid-template-columns: 22px minmax(0, 1fr) auto; }
+.acct-actions { display: inline-flex; align-items: center; gap: 2px; }
+.acct-mini { width: 26px; height: 26px; border-radius: 8px; color: var(--ash-2); font-size: 11px; }
+.acct-mini:hover, .acct-mini:focus-visible { color: var(--bone); background: rgba(238, 239, 232, 0.07); }
+.acct-unread { font-style: normal; font-family: var(--mono); font-size: 10px; margin-left: 7px; padding: 0 6px; border-radius: 999px;
+  background: var(--lime); color: var(--lime-ink); vertical-align: 1px; }
+.svc {
+  width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; flex: none;
+  font-size: 11.5px; font-weight: 700; color: var(--svc); background: color-mix(in srgb, var(--svc) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--svc) 38%, transparent);
+}
+
+.ibx-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; flex: 1; padding-right: 6px; margin-right: -8px; }
+.ibx { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; border-radius: 14px; border: 1px solid var(--line);
+  background: rgba(238, 239, 232, 0.025); animation: rise 0.2s ease-out; }
+.ibx.u-high { border-color: rgba(242, 184, 75, 0.45); box-shadow: inset 3px 0 0 var(--warn); }
+.ibx.is-done { opacity: 0.55; }
+.ibx-top { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 9px; align-items: center; }
+.ibx-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.ibx-who b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ibx-who .mono { font-size: 10.5px; color: var(--ash); }
+.u-high .ibx-who .mono { color: var(--warn); }
+.ibx-sum { font-size: 13.5px; color: var(--bone); line-height: 1.4; user-select: text; }
+.ibx-orig { text-align: left; font-size: 12px; color: var(--ash); line-height: 1.45; user-select: text; overflow-wrap: anywhere; }
+.ibx-orig:hover { color: var(--bone-2); }
+.ibx-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--lime); }
+.ibx-reply {
+  width: 100%; resize: vertical; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(214, 242, 75, 0.25);
+  background: rgba(214, 242, 75, 0.05); color: var(--bone); font: inherit; font-size: 13.5px; line-height: 1.45; user-select: text;
+}
+.ibx-ask { display: flex; gap: 6px; }
+.ibx-ask input { height: 30px; font-size: 12.5px; }
+.ibx-ask button { height: 30px; background: transparent; border: 1px solid var(--line-2); color: var(--bone-2); font-weight: 500; font-size: 12px; }
+.ibx-ask button:hover:not(:disabled) { border-color: var(--lime); color: var(--lime); }
+.ibx-note { font-size: 12px; color: var(--warn); }
+.ibx-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ibx-btn { height: 28px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--line-2); font-size: 12px; color: var(--bone-2); }
+.ibx-btn:hover { border-color: var(--bone-2); color: var(--bone); }
+.ibx-btn.primary { background: var(--lime); border-color: var(--lime); color: var(--lime-ink); font-weight: 600; }
+.ibx-btn.primary:hover { filter: brightness(1.06); color: var(--lime-ink); }
 
 /* ------------------------------------------------------------------ halt */
 .halt-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(5, 5, 6, 0.9); }

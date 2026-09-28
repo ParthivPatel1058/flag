@@ -327,6 +327,39 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
           </section>
         ) : null}
 
+        {settings ? (
+          <section className="set-sec">
+            <h3>Inbox agent</h3>
+            <p className="set-note">
+              New messages on the accounts you connect (Connections → Your accounts) and in Gmail show up in the Inbox tab,
+              each with a reply PLAG drafted. PLAG never sends them: you copy the reply and send it yourself. To draft, the
+              message goes to the AI that writes the reply.
+            </p>
+            <label className="set-row">
+              <span>Watch my accounts for new messages</span>
+              <input type="checkbox" checked={settings.inbox_agent} onChange={(e) => void change({ inbox_agent: e.target.checked })} />
+            </label>
+            <label className="set-row">
+              <span>Draft a reply for each new message</span>
+              <input type="checkbox" checked={settings.inbox_draft} onChange={(e) => void change({ inbox_draft: e.target.checked })} />
+            </label>
+            <label className="set-row">
+              <span>Tell me about new messages out loud</span>
+              <input type="checkbox" checked={settings.inbox_announce} onChange={(e) => void change({ inbox_announce: e.target.checked })} />
+            </label>
+            <form className="set-row" onSubmit={(e) => {
+              e.preventDefault();
+              const v = (new FormData(e.currentTarget).get('owner') as string) ?? '';
+              void change({ inbox_owner: v.trim() });
+            }}>
+              <span>Your name, for replies written as you</span>
+              <input className="city" name="owner" key={settings.inbox_owner} defaultValue={settings.inbox_owner} placeholder="e.g. Parthiv"
+                aria-label="Your name" autoComplete="off" spellCheck={false}
+                onBlur={(e) => e.target.value.trim() !== settings.inbox_owner && void change({ inbox_owner: e.target.value.trim() })} />
+            </form>
+          </section>
+        ) : null}
+
         <section className="set-sec">
           <h3>Memory and storage</h3>
           <p className="set-note">

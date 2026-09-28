@@ -32,6 +32,11 @@ DEFAULTS = {
     "voice_engine": "auto",
     "sarvam_speaker": "shubh",               # Sarvam Bulbul v3 voice
     "edge_voice": "hi-IN-MadhurNeural",      # Microsoft Edge voice (free, no key)
+    # Inbox agent (inbox.py): new messages from the accounts you connected, each with a reply PLAG drafts (never sends)
+    "inbox_agent": True,                     # watch connected accounts and Gmail for new messages
+    "inbox_draft": True,                     # draft a reply for each (the message goes to the AI to write it)
+    "inbox_announce": True,                  # say new messages out loud (always shown in the Inbox tab)
+    "inbox_owner": "",                       # your name, so drafts are signed and written as you
     "v": 2,                                  # settings version, for moving old defaults forward once
 }
 VOICE_ENGINES = ("auto", "sarvam", "nvidia", "edge", "elevenlabs", "local")
@@ -83,7 +88,7 @@ def update(changes: dict) -> dict:
             value = min(1000, max(40, value))
         if key == "eleven_reserve_pct":
             value = min(50, max(0, value))
-        if key == "home_city":
+        if key in ("home_city", "inbox_owner"):
             value = " ".join(value.split())[:60]
         current[key] = value
     with _lock:

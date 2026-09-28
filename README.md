@@ -133,6 +133,20 @@ banao”) uses the camera: Gemini describes what you're showing and FLUX draws i
 (NVIDIA's hosted editing models only accept its own sample images). Every image is saved to `Pictures\PLAG` and shown
 on the dashboard with Open / Show in folder. Key: Credential Manager, `PLAG / nvidia_image_api_key`.
 
+**Inbox agent: your accounts (Gmail, LinkedIn, Instagram, X, anything):** Connections → *Your accounts* → **+ Connect**,
+type the site's address (`linkedin.com`) or pick one of the chips. PLAG opens the real sign-in page in its own window;
+you sign in there (PLAG never sees your password) and close it. Each account keeps its own private, signed-in session.
+From then on PLAG keeps that site's messages page open in the background and catches its "new message" notifications
+and unread count. Every new message lands in the **Inbox** tab with a one-line summary and a **reply PLAG drafted**
+(Gemini, GLM and Muse race to write it, in the message's own language). Edit it, **Copy reply**, and **Open** the chat
+to paste and send it yourself: PLAG drafts, it never sends on these accounts. Tell it how to answer (“yes, 5 pm works”,
+“decline politely”) and it redrafts. By voice: “any new messages?”, “koi naya message?”, “reply to Ananya's LinkedIn
+message saying I'm interested”. Security codes and sign-in alerts are never drafted or read out. Up to 6 accounts are
+watched at once (each is a browser page, ~100–200 MB); pause or disconnect one with its buttons (disconnecting signs
+it out and wipes its cookies). Messages are kept 14 days in `plag.db`. ⚙ Settings → *Inbox agent* turns watching,
+drafting and announcing on or off, and sets your name for replies written as you. Google sometimes refuses to sign in
+inside an app window: then use *Gmail + Calendar* below, which PLAG also checks for new mail every two minutes.
+
 **Gmail + Calendar** (read-only): “check my important emails”, “any new mail?”, “what's my schedule tomorrow”,
 “aaj ka schedule”. One-time setup, done by you because it's tied to your Google account:
 1. [console.cloud.google.com](https://console.cloud.google.com) → create a project → *APIs & Services* → enable the

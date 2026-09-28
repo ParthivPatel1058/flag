@@ -13,6 +13,13 @@ interface PlagBridge {
   captureScreen(): Promise<string | null>; // a JPEG data URL of the screen, or null
   notify(title: string, body: string): void;
   pickGoogleClient(): Promise<string | null>;
+  /** Connected accounts (Gmail, LinkedIn, Instagram…): signed in on the real site in a PLAG window, watched, never sent from. */
+  accounts(): Promise<import('./state/store').Account[]>;
+  addAccount(url: string): Promise<{ account?: import('./state/store').Account; error?: string }>;
+  openAccount(id: string, url?: string): Promise<boolean>;
+  watchAccount(id: string, on: boolean): Promise<boolean>;
+  removeAccount(id: string): Promise<boolean>;
+  onAccounts(fn: (list: import('./state/store').Account[]) => void): () => void;
   /** Bring the dashboard window to the front (used by the wake word). */
   reveal(): void;
   platform: string;

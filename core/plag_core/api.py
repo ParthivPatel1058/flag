@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__, approvals, whatsapp
-from . import documents, drafts, imagegen, location, model3d, navigation, weather
+from . import documents, drafts, imagegen, inbox, location, model3d, navigation, weather
 from . import memory as mem
 from . import settings as app_settings
 from .elevenlabs import REALTIME_ERRORS, ElevenError, eleven
@@ -228,7 +228,8 @@ async def _warm_voice() -> None:
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     tasks = [asyncio.create_task(_metrics_loop()), asyncio.create_task(_parent_watchdog()),
-             asyncio.create_task(_reminder_loop()), asyncio.create_task(_idle_loop())]
+             asyncio.create_task(_reminder_loop()), asyncio.create_task(_idle_loop()),
+             asyncio.create_task(inbox.worker()), asyncio.create_task(inbox.gmail_poller())]
     audit("core.start", version=__version__)
     if wake_mod.available():  # warm the listening model so the first "PLAG" is quick
         threading.Thread(target=wake_mod.model, daemon=True).start()
@@ -401,6 +402,22 @@ def google_row() -> dict:
             "detail": detail, "action": "disconnect" if g["connected"] else "connect"}
 
 
+def inbox_row() -> dict:
+    s = app_settings.get()
+    if not s["inbox_agent"]:
+        return {"id": "inbox", "name": "Inbox agent", "role": "Drafts replies to new messages", "state": "off",
+                "detail": "Turned off in Settings"}
+    try:
+        new = inbox.items(60, status="new")
+    except Exception:
+        new = []
+    drafted = sum(1 for i in new if i["reply"])
+    detail = (f"{len(new)} new · {drafted} replies drafted · you send them" if new else
+              "Watching your connected accounts · drafts replies, never sends")
+    return {"id": "inbox", "name": "Inbox agent", "role": "Drafts replies to new messages", "state": "online" if new else "ready",
+            "detail": detail}
+
+
 def connectors() -> list[dict]:
     def latest(models: list[str]) -> tuple[str, dict] | None:
         seen = [(m, gemini.health[m]) for m in models if m in gemini.health]
@@ -443,7 +460,7 @@ def connectors() -> list[dict]:
         weather_row(),
         location_row(),
         google_row(),
-        {"id": "linkedin", "name": "LinkedIn", "role": "Sign in and post", "state": "planned", "detail": "Connects in phase 12"},
+        inbox_row(),
     ]
 
 
@@ -509,6 +526,21 @@ class GoogleClientRequest(BaseModel):
 class Decision(BaseModel):
     approve: bool
     lang: str = "auto"
+
+
+class InboxEvent(BaseModel):
+    """A new message the desktop shell saw on a connected account (the site's own notification or unread count)."""
+    account: str = Field(min_length=1, max_length=60)
+    service_url: str = Field(min_length=3, max_length=300)
+    title: str = Field(default="", max_length=300)
+    body: str = Field(default="", max_length=4000)
+    url: str = Field(default="", max_length=600)
+    kind: str = Field(default="message", pattern=r"^(message|count)$")
+    count: int = Field(default=0, ge=0, le=100000)
+
+
+class Redraft(BaseModel):
+    instruction: str = Field(default="", max_length=300)  # "say yes, 5 pm works", "decline politely"
 
 
 class VisionRequest(BaseModel):
@@ -947,6 +979,64 @@ async def google_callback(state: str = "", code: str = "", error: str = ""):
     return Response(_PAGE.format(color="#D6F24B", title="PLAG is connected to Google",
                                  body=f"{esc(email)} · read-only email and calendar. You can close this tab."),
                     media_type="text/html")
+
+
+# ---------------------------------------------------------------- inbox agent
+
+def _inbox_out(item: dict) -> dict:
+    """One message for the dashboard: security codes stay masked."""
+    if item.get("kind") == "code":
+        return {**item, "text": inbox.mask_codes(item["text"]), "subject": inbox.mask_codes(item["subject"])}
+    return item
+
+
+@app.post("/v1/inbox/event")
+async def inbox_event(ev: InboxEvent):
+    if policy.halted or not app_settings.get()["inbox_agent"]:
+        return {"ok": False, "stored": False}
+    if ev.kind == "count":
+        # only an unread count changed (the site didn't say who wrote): one line, no draft
+        item = inbox.add(account=ev.account, service_url=ev.service_url, title="", sender="New activity",
+                         body=f"{ev.count} unread" + (f" · {ev.title[:120]}" if ev.title else ""), url=ev.url, kind="count")
+    else:
+        item = inbox.add(account=ev.account, service_url=ev.service_url, title=ev.title, body=ev.body, url=ev.url)
+    if item is None:
+        return {"ok": True, "stored": False}
+    if item["kind"] == "count":
+        await asyncio.to_thread(inbox.set_summary, item["id"], f"{ev.count} unread on {item['service_name']}.")
+        bus.publish("inbox.changed", {})
+    else:
+        inbox.submit(item)
+    return {"ok": True, "stored": True, "id": item["id"]}
+
+
+@app.get("/v1/inbox")
+async def inbox_list():
+    rows = await asyncio.to_thread(inbox.items, 40)
+    return {"items": [_inbox_out(i) for i in rows]}
+
+
+@app.post("/v1/inbox/{item_id}/redraft")
+async def inbox_redraft(item_id: str, req: Redraft):
+    item = await asyncio.to_thread(inbox.get, item_id)
+    if item is None:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    out = await inbox.draft(item, req.instruction)
+    bus.publish("inbox.changed", {})
+    return {"ok": True, "reply": out["reply"], "summary": out["summary"]}
+
+
+@app.post("/v1/inbox/{item_id}/done")
+async def inbox_done(item_id: str):
+    """You sent the reply (or dealt with it): it leaves the "new" list."""
+    ok = await asyncio.to_thread(inbox.set_status, item_id, "done")
+    return {"ok": ok}
+
+
+@app.delete("/v1/inbox/{item_id}")
+async def inbox_dismiss(item_id: str):
+    ok = await asyncio.to_thread(inbox.set_status, item_id, "dismissed")
+    return {"ok": ok}
 
 
 @app.get("/v1/memory")
