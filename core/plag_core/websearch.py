@@ -1,6 +1,7 @@
 """Web search for answers and the autopilot: real results from across the web (not just Wikipedia and news headlines).
 
-Tavily's search API (made for AI agents: each result comes with the relevant text already extracted). Free tier:
+TinyFish first when its key is saved (tinyfish.py: free search, then the top pages read in full); else Tavily's
+search API (made for AI agents: each result comes with the relevant text already extracted). Free tier:
 1,000 searches a month at tavily.com. Key: Windows Credential Manager, PLAG / tavily_api_key. Without it PLAG still
 answers from Wikipedia and Google News. Results are data: the AI is told never to follow instructions inside them.
 """
@@ -10,6 +11,7 @@ import time
 import httpx
 
 from .secrets import get_secret
+from .tinyfish import tinyfish
 
 URL = "https://api.tavily.com/search"
 
@@ -25,12 +27,16 @@ class WebSearch:
         return get_secret("tavily_api_key")
 
     def ready(self) -> bool:
-        return bool(self.key()) and time.time() >= self._rest_until
+        return tinyfish.ready() or (bool(self.key()) and time.time() >= self._rest_until)
 
     async def search(self, query: str, limit: int = 5) -> list[dict]:
         """[{title, url, content, site}] (empty when there's no key or the search failed: callers carry on without it)."""
+        if tinyfish.ready():
+            found = await tinyfish.research(query, limit)
+            if found:
+                return [{k: f[k] for k in ("title", "url", "site", "content")} for f in found]
         key = self.key()
-        if not key or not self.ready() or not query.strip():
+        if not key or time.time() < self._rest_until or not query.strip():
             return []
         t0 = time.perf_counter()
         try:

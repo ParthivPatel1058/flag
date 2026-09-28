@@ -478,7 +478,8 @@ async function handleResult(res: TurnResult, ctrl: AbortController, spoken = fal
     return;
   }
   if (client?.type === 'image' && client.id) await showImage(client.id, client.prompt ?? '');
-  if (client?.type === 'inbox') useStore.getState().setTab('inbox'); // "any new messages?": the Inbox tab
+  if (client?.type === 'inbox') useStore.getState().setTab('inbox');
+  if (client?.type === 'copy' && client.text) void navigator.clipboard.writeText(client.text).catch(() => undefined); // a booking link // "any new messages?": the Inbox tab
   if (client?.type === 'draft_saved' && client.id) markSaved(client.id); // "save": the card shows it's kept
   if (client?.type === 'route' && client.steps) startNav(client as unknown as RouteClient);
   await ackPlaying?.catch(() => undefined); // let "On it." finish before the result
@@ -1139,6 +1140,32 @@ export async function saveFishKey(key: string): Promise<string | null> {
 export async function removeFishKey(): Promise<void> {
   await call('/v1/fish/key', { method: 'DELETE' }).catch(() => undefined);
   await loadSettings();
+}
+
+// ---------------------------------------------------------------- optional keys (Settings → Keys)
+
+export type KeyService = 'tinyfish' | 'calcom' | 'tavily' | 'groq';
+
+export async function loadKeys(): Promise<Record<KeyService, boolean> | null> {
+  try {
+    return (await call<{ keys: Record<KeyService, boolean> }>('/v1/keys')).keys;
+  } catch {
+    return null;
+  }
+}
+
+/** Checked with the service, then kept in Windows Credential Manager. Returns an error message, or null. */
+export async function saveKey(service: KeyService, key: string): Promise<string | null> {
+  try {
+    await call(`/v1/keys/${service}`, { json: { key } });
+    return null;
+  } catch (e) {
+    return e instanceof CoreError ? e.message : String(e);
+  }
+}
+
+export async function removeKey(service: KeyService): Promise<void> {
+  await call(`/v1/keys/${service}`, { method: 'DELETE' }).catch(() => undefined);
 }
 
 export async function removeSarvamKey(): Promise<void> {

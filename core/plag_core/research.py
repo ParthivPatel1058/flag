@@ -27,6 +27,7 @@ import httpx
 from .config import MODELS
 from .gemini import ProviderError, gemini
 from .nvidia import nvidia
+from .tinyfish import tinyfish
 
 FEED = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 MAX_SOURCES = 10
@@ -87,6 +88,15 @@ async def _news(topic: str) -> list[dict]:
                       "date": when})
         if len(items) >= MAX_SOURCES:
             break
+    if len(items) < MAX_SOURCES and tinyfish.ready():
+        # TinyFish's news search: more outlets than Google News alone finds
+        for it in await tinyfish.search(topic, MAX_SOURCES, news=True):
+            key = re.sub(r"\W+", " ", it["title"].casefold()).strip()
+            if it["title"] and key not in seen:
+                seen.add(key)
+                items.append({"title": it["title"], "source": it["site"] or "news", "link": it["url"], "date": it["date"][:20]})
+            if len(items) >= MAX_SOURCES:
+                break
     return items
 
 

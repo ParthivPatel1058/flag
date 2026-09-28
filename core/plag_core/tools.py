@@ -315,3 +315,38 @@ async def system_status() -> ToolResult:
         top = sampler.top
     sample = await asyncio.to_thread(sampler.sample)
     return ToolResult(True, f"CPU {sample['cpu']:.0f}% · memory {sample['mem']['pct']:.0f}%", {"sample": sample, "top": top})
+
+
+# ---------------------------------------------------------------- Cal.com: these email the other person, so L2 (asks you)
+
+from .calcom import CalError, calcom, say_time  # noqa: E402  (after the registry it registers into)
+
+
+@tool(ToolSpec("cal_book", Level.EXTERNAL, "Book a Cal.com meeting (Cal.com emails the invite)", timeout_s=30))
+async def cal_book(event_type_id: int, start: str, name: str, email: str, notes: str = "") -> ToolResult:
+    try:
+        b = await calcom.book(event_type_id, start, name, email, notes)
+    except CalError as e:
+        return ToolResult(False, str(e), state="failed")
+    link = f" Meeting link: {b['url']}." if b["url"] else ""
+    return ToolResult(True, f"Booked {b['title']} with {name}, {say_time(b['start'])}. Cal.com has emailed the invite.{link}",
+                      {"uid": b["uid"]}, state="booked")
+
+
+@tool(ToolSpec("cal_cancel", Level.EXTERNAL, "Cancel a Cal.com booking (Cal.com tells the attendee)", timeout_s=30))
+async def cal_cancel(uid: str, label: str, reason: str = "") -> ToolResult:
+    try:
+        await calcom.cancel(uid, reason)
+    except CalError as e:
+        return ToolResult(False, str(e), state="failed")
+    return ToolResult(True, f"Cancelled {label}. Cal.com has let them know.", {"uid": uid}, state="cancelled")
+
+
+@tool(ToolSpec("cal_reschedule", Level.EXTERNAL, "Move a Cal.com booking to a new time (Cal.com tells the attendee)", timeout_s=30))
+async def cal_reschedule(uid: str, start: str, label: str, reason: str = "") -> ToolResult:
+    try:
+        b = await calcom.reschedule(uid, start, reason)
+    except CalError as e:
+        return ToolResult(False, str(e), state="failed")
+    return ToolResult(True, f"Moved {label} to {say_time(b['start'])}. Cal.com has let them know.", {"uid": b["uid"]},
+                      state="rescheduled")

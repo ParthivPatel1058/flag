@@ -55,7 +55,7 @@ export interface Connector {
 }
 export interface Approval {
   id: string;
-  kind: 'whatsapp';
+  kind: 'whatsapp' | 'calendar';
   name: string;
   phone_tail: string;
   message: string;
@@ -75,6 +75,7 @@ export interface TurnResult {
     hours?: number[]; variable?: string; label?: string; // a weather simulation's maps
     title?: string; kind?: string; summary?: string; words?: number; sources?: number; // a PDF PLAG wrote
     steps?: RouteStep[]; // directions (the rest of RouteView comes with them)
+    text?: string; // copy: a booking link put on the clipboard
   } | null;
   vision?: { label: string; confidence: string } | null;
   sources?: { title: string; url: string; site: string }[]; // Wikipedia and news links behind an answer

@@ -146,3 +146,10 @@ export const PowerIcon = (p: P) => (
     <path d="M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0" />
   </svg>
 );
+
+export const CalendarIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+    <path d="M3.5 10h17M8 3v4M16 3v4" />
+  </svg>
+);

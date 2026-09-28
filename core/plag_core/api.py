@@ -22,6 +22,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import __version__, approvals, whatsapp
 from . import documents, drafts, imagegen, inbox, location, model3d, navigation, weather
 from .websearch import websearch
+from .tinyfish import TinyFishError, tinyfish
+from .calcom import CalError, calcom
+from .secrets import delete_secret, get_secret, set_secret
 from . import memory as mem
 from . import settings as app_settings
 from .elevenlabs import REALTIME_ERRORS, ElevenError, eleven
@@ -434,6 +437,31 @@ def inbox_row() -> dict:
             "detail": detail}
 
 
+def tinyfish_row() -> dict:
+    h = tinyfish.health
+    if not tinyfish.key():
+        state, detail = "off", "No key · Settings → Keys → TinyFish: web search, page reading and a web agent"
+    elif not tinyfish.ready():
+        state, detail = "degraded", f"Paused after an error ({tinyfish.last_error}) · Wikipedia and news still work"
+    elif h and h["ok"]:
+        state, detail = "online", f"Last {h.get('what', 'search')} · {h['ms'] / 1000:.1f} s · search is free, the web agent uses credits"
+    else:
+        state, detail = "ready", "Search and page reading for answers; the web agent for tasks on websites"
+    return {"id": "tinyfish", "name": "TinyFish", "role": "Web search and web agent", "state": state, "detail": detail}
+
+
+def calcom_row() -> dict:
+    if not calcom.configured():
+        state, detail = "off", "No key · Settings → Keys → Cal.com: meetings, free slots, booking by voice"
+    elif calcom.last_error and calcom.last_error != "not_found":
+        state, detail = "degraded", f"Last request failed ({calcom.last_error})"
+    else:
+        me = calcom._me[0] if calcom._me else None
+        who = f"cal.com/{me['username']}" if me and me.get("username") else "Connected"
+        state, detail = ("online" if calcom.health else "ready"), f"{who} · booking, cancelling and moving ask you first"
+    return {"id": "calcom", "name": "Cal.com", "role": "Meetings and booking", "state": state, "detail": detail}
+
+
 def websearch_row() -> dict:
     h = websearch.health
     if not websearch.key():
@@ -491,6 +519,8 @@ def connectors() -> list[dict]:
         location_row(),
         google_row(),
         inbox_row(),
+        calcom_row(),
+        tinyfish_row(),
         websearch_row(),
     ]
 
@@ -898,6 +928,54 @@ async def settings_get():
 
 class SarvamKeyRequest(BaseModel):
     key: str = Field(min_length=10, max_length=200)
+
+
+# ---------------------------------------------------------------- keys saved from Settings → Keys
+
+KEYS_FROM_SETTINGS = {"tinyfish": "tinyfish_api_key", "calcom": "calcom_api_key", "tavily": "tavily_api_key", "groq": "groq_api_key"}
+
+
+class KeyRequest(BaseModel):
+    key: str = Field(min_length=10, max_length=300)
+
+
+@app.get("/v1/keys")
+async def keys_status():
+    """Which optional keys are saved (never the keys themselves)."""
+    return {"keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()}}
+
+
+@app.post("/v1/keys/{service}")
+async def keys_save(service: str, req: KeyRequest):
+    """Check a key with its service, then keep it in Windows Credential Manager. It's never returned or logged."""
+    name = KEYS_FROM_SETTINGS.get(service)
+    if not name:
+        return JSONResponse({"error": "unknown", "message": "Unknown service."}, status_code=404)
+    key = req.key.strip()
+    try:
+        if service == "tinyfish":
+            await tinyfish.check_key(key)
+        elif service == "calcom":
+            if not key.startswith("cal_"):
+                return JSONResponse({"error": "bad_key", "message": "A Cal.com key starts with cal_live_ (Settings → Security)."}, status_code=422)
+            await calcom.check_key(key)
+    except (TinyFishError, CalError) as e:
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+    await asyncio.to_thread(set_secret, name, key)
+    audit("key.saved", service=service)
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"ok": True, "keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()}}
+
+
+@app.delete("/v1/keys/{service}")
+async def keys_remove(service: str):
+    name = KEYS_FROM_SETTINGS.get(service)
+    if not name:
+        return JSONResponse({"error": "unknown"}, status_code=404)
+    await asyncio.to_thread(delete_secret, name)
+    audit("key.removed", service=service)
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"ok": True}
 
 
 @app.post("/v1/fish/key")

@@ -476,6 +476,8 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radi
 .key-form input:focus, .set-row select:focus { outline: none; border-color: rgba(214, 242, 75, 0.5); }
 .key-form button { height: 32px; padding: 0 14px; border-radius: 9px; background: var(--lime); color: var(--lime-ink); font-weight: 600; font-size: 13px; }
 .key-form button:disabled { opacity: 0.5; }
+.key-row { display: flex; flex-direction: column; gap: 6px; }
+.key-actions { display: inline-flex; align-items: center; gap: 10px; flex: none; }
 .set-note { font-size: 12.5px; line-height: 1.5; color: var(--ash); }
 .set-note a { color: var(--lime); }
 .set-status { font-size: 13px; }

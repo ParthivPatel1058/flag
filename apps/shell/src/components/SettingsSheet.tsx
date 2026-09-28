@@ -1,12 +1,69 @@
 import { useEffect, useState } from 'react';
 import {
-  clearCaches, elevenVoices, loadSettings, removeElevenKey, removeFishKey, removeSarvamKey, saveElevenKey, saveFishKey, saveSarvamKey,
+  clearCaches, elevenVoices, loadKeys, loadSettings, removeKey, saveKey, removeElevenKey, removeFishKey, removeSarvamKey, saveElevenKey, saveFishKey, saveSarvamKey,
   saveSettings,
-  type ElevenStatus, type Live, type Settings, type VoiceEngine,
+  type ElevenStatus, type KeyService, type Live, type Settings, type VoiceEngine,
 } from '../lib/voice';
 import { CloseIcon } from './icons';
 
 type Voice = { id: string; name: string; category: string };
+
+const KEY_ROWS: { id: KeyService; name: string; what: string; where: string; url: string }[] = [
+  { id: 'tinyfish', name: 'TinyFish', what: 'Web search, page reading and a web agent that works on websites for you', where: 'agent.tinyfish.ai → API keys', url: 'https://agent.tinyfish.ai/api-keys' },
+  { id: 'calcom', name: 'Cal.com', what: 'Your meetings, free slots, booking link, and booking by voice (asks you first)', where: 'Cal.com → Settings → Security', url: 'https://app.cal.com/settings/developer/api-keys' },
+  { id: 'groq', name: 'Groq', what: 'The fastest answers (Llama 3.3 70B), free', where: 'console.groq.com → API keys', url: 'https://console.groq.com/keys' },
+  { id: 'tavily', name: 'Tavily', what: 'Backup web search when TinyFish isn’t set up', where: 'tavily.com → API keys', url: 'https://app.tavily.com' },
+];
+
+/** Optional keys: each is checked with its service, then kept in Windows Credential Manager (never shown again). */
+function KeysSection() {
+  const [keys, setKeys] = useState<Record<KeyService, boolean> | null>(null);
+  const [open, setOpen] = useState<KeyService | null>(null);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { void loadKeys().then(setKeys); }, []);
+  const save = async (id: KeyService) => {
+    setBusy(true);
+    const err = await saveKey(id, value);
+    setBusy(false);
+    setValue('');
+    setMsg(err ? { ok: false, text: err } : { ok: true, text: 'Saved in Windows Credential Manager.' });
+    if (!err) { setOpen(null); setKeys(await loadKeys()); }
+  };
+  return (
+    <section className="set-sec">
+      <h3>Keys</h3>
+      <p className="set-note">Optional connections. Each key is checked with its service, then kept in Windows Credential Manager; PLAG never shows it again.</p>
+      {KEY_ROWS.map((k) => (
+        <div key={k.id} className="key-row">
+          <div className="set-row">
+            <span><b>{k.name}</b> · {k.what}</span>
+            {keys?.[k.id] ? (
+              <span className="key-actions">
+                <span className="set-status ok">Connected</span>
+                <button className="link-btn" onClick={() => void removeKey(k.id).then(loadKeys).then(setKeys)}>Remove</button>
+              </span>
+            ) : (
+              <button className="link-btn" onClick={() => { setOpen(open === k.id ? null : k.id); setMsg(null); setValue(''); }}>
+                {open === k.id ? 'Cancel' : 'Add key'}
+              </button>
+            )}
+          </div>
+          {open === k.id ? (
+            <form className="key-form" onSubmit={(e) => { e.preventDefault(); void save(k.id); }}>
+              <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder={`${k.name} API key`}
+                aria-label={`${k.name} API key`} autoComplete="off" spellCheck={false} autoFocus />
+              <button type="submit" disabled={busy || value.trim().length < 10}>{busy ? 'Checking…' : 'Connect'}</button>
+            </form>
+          ) : null}
+          {open === k.id ? <p className="set-note">Get it at <a href={k.url} target="_blank" rel="noreferrer">{k.where}</a>.</p> : null}
+        </div>
+      ))}
+      {msg ? <p className={`set-status ${msg.ok ? 'ok' : 'warn'}`}>{msg.text}</p> : null}
+    </section>
+  );
+}
 
 const ENGINES: { id: VoiceEngine; label: string; title: string }[] = [
   { id: 'auto', label: 'Auto', title: 'The best voice available: Jarvis on Fish Audio or Sarvam once a key is saved, else Leo on NVIDIA, else Edge' },
@@ -404,6 +461,8 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
             </form>
           </section>
         ) : null}
+
+        <KeysSection />
 
         <section className="set-sec">
           <h3>Memory and storage</h3>

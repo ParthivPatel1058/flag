@@ -31,7 +31,12 @@ TOOLS = {
     "lookup": "facts about anything from the web, Wikipedia and the latest news. query = subject, question = what to find out",
     "research": "a cited news brief on a topic, saved as a PDF draft. text = topic",
     "weather": "forecast. text = city ('' = where the user is), day = today|tomorrow",
-    "calendar_check": "the user's schedule. day = today|tomorrow",
+    "calendar_check": "the user's Google Calendar. day = today|tomorrow",
+    "cal_bookings": "the user's Cal.com meetings. day = today|tomorrow (omit for all upcoming)",
+    "cal_slots": "when the user is free to be booked on Cal.com. day, text = kind of meeting ('30 min')",
+    "cal_link": "the user's Cal.com booking link (to offer someone). text = kind of meeting",
+    "web_task": "TinyFish's web agent browses a real website and reports back (live prices, listings, timetables; 20-60 s, "
+                "read-only). url = https page to start from, text = exactly what to find",
     "gmail_check": "the user's Gmail. kind = important|unread|today",
     "gmail_search": "search the user's Gmail. query",
     "inbox_check": "new messages on the user's connected accounts (LinkedIn, Instagram, X, Gmail...)",

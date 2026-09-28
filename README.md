@@ -142,6 +142,21 @@ the monsoon forecast and draw a poster about it”. PLAG also switches to autopi
 several steps that depend on each other. It never sends messages, calls, deletes, installs or pays on its own: when
 a goal needs a message sent, it drafts it and asks you.
 
+**TinyFish (web search + web agent):** answers to “who is…” / “look up…”, news reports and the autopilot use
+TinyFish's search and read the top pages in full (free). For things only a website can tell you, the **web agent**
+browses the site in TinyFish's cloud browser and reports back: “check the price of iPhone 16 on Flipkart”, “train
+timings from Ahmedabad to Mumbai on IRCTC”, “today's show times at PVR”. The Now panel shows what it's doing. It only
+reads: PLAG tells it never to buy, book, sign in, post or send anything. It uses TinyFish credits, so PLAG only sends it
+when a plain search can't answer.
+
+**Cal.com (meetings):** “what meetings do I have tomorrow”, “when am I free tomorrow for a 30 min call”, “share my
+booking link” (copied for you), “book a 30 min call with Ananya at ananya@example.com tomorrow 5 pm”, “cancel my
+meeting with Rahul”, “move my call with Rahul to Friday 4 pm”. Booking, cancelling and moving email the other person,
+so PLAG shows a confirmation card first and waits for your “yes”. The briefing includes today's Cal.com meetings, and
+when someone in your inbox asks to meet, PLAG's drafted reply can offer your booking link.
+
+Add both keys in ⚙ Settings → **Keys** (each is checked with its service before it's saved).
+
 **Keys that make PLAG better** (all optional except Gemini; each one saved the same way as step 1 of setup, name
 after `PLAG /`):
 
@@ -154,7 +169,9 @@ after `PLAG /`):
 | `nvidia_speech_api_key` | Leo, the streamed voice | build.nvidia.com |
 | `nvidia_image_api_key`, `nvidia_trellis_api_key`, `nvidia_weather_api_key` | Images, 3D models, the weather simulation | build.nvidia.com |
 | `groq_api_key` | Llama 3.3 70B on Groq: usually the fastest answer of all | console.groq.com (free) |
-| `tavily_api_key` | Real web results for answers and the autopilot | tavily.com (1,000 free a month) |
+| `tinyfish_api_key` | Web search and page reading (free), plus a web agent that does tasks on real websites (uses TinyFish credits) | agent.tinyfish.ai → API keys |
+| `calcom_api_key` | Cal.com: your meetings, free slots, booking link, and booking / cancelling / moving by voice | Cal.com → Settings → Security |
+| `tavily_api_key` | Backup web search when TinyFish isn't set up | tavily.com (1,000 free a month) |
 | `fishaudio_api_key` | The **Jarvis voice** on Fish Audio, PLAG's first voice once saved (Settings → Voice → Jarvis) | fish.audio → API keys |
 | `sarvam_api_key` | Indian voices (Settings → Voice) | dashboard.sarvam.ai |
 | `elevenlabs_api_key` | Your own voice and realtime hearing (Settings → ElevenLabs) | elevenlabs.io |

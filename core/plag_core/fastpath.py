@@ -192,8 +192,8 @@ _REMEMBER = re.compile(r"^(?:please\s+)?(?:remember|note down|make a note|yaad r
 _REMEMBER_TAIL = re.compile(r"^(?P<t>.+?)\s+(?:yaad rakhna|yaad rakho|याद रखना|याद रखो)$", re.I)
 _RECALL = re.compile(r"^(?:what do you remember(?: about me)?|what do you know about me|what have i told you"
                      r"|show (?:my )?memor(?:y|ies)|tumhe kya yaad hai|kya yaad hai|तुम्हें क्या याद है|क्या याद है)\??$", re.I)
-BRIEFING = ("Give me my briefing: today's weather where I am, my calendar for today, important emails, new messages on "
-            "my accounts, my reminders, and the top 3 news headlines in India. Then tell me the 2-3 things that need my "
+BRIEFING = ("Give me my briefing: today's weather where I am, my calendar and Cal.com meetings for today, important "
+            "emails, new messages on my accounts, my reminders, and the top 3 news headlines in India. Then tell me the 2-3 things that need my "
             "attention first.")
 # The autopilot: a daily briefing, or any goal said as "autopilot: ..." / "agent, ..."
 _BRIEFING = re.compile(r"^(?:brief me|(?:give me )?(?:my |the )?(?:daily |morning )?briefing|plan my day|what'?s my day(?: look)?(?: like)?"
