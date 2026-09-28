@@ -15,6 +15,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const FILE = () => path.join(app.getPath('userData'), 'accounts.json');
+const LOG_FILE = () => path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'PLAG', 'logs', 'accounts.log');
+
+/** What happened while connecting or watching, so a failure can be read back instead of guessed at. */
+function log(...parts) {
+  const line = `${new Date().toISOString()} ${parts.join(' ')}\n`;
+  try {
+    fs.mkdirSync(path.dirname(LOG_FILE()), { recursive: true });
+    fs.appendFileSync(LOG_FILE(), line);
+  } catch {
+    // logging must never stop a sign-in
+  }
+  console.log('[accounts]', ...parts);
+}
+
+/** An account's last problem, shown on its row in Connections. */
+function fail(a, message) {
+  const l = live.get(a.id);
+  if (l) l.error = String(message).slice(0, 140);
+  log(a.host, 'ERROR', message);
+  push();
+}
 const MAX_ACCOUNTS = 12;
 const MAX_WATCHING = 6; // each watcher is a browser page (~100-200 MB): enough for the accounts that matter
 const RELOAD_MS = 20 * 60 * 1000; // a fresh page every 20 minutes, in case a site's live connection went quiet
@@ -42,6 +63,9 @@ const KNOWN = [
   { host: 'discord.com', match: /(^|\.)discord\.com$/, name: 'Discord', service: 'discord',
     home: 'https://discord.com/login', watch: 'https://discord.com/channels/@me', color: '#5865f2' },
 ];
+// Google refuses to sign you in inside an app window ("this browser or app may not be secure"), whatever the browser
+// says it is. There's no way around it, so PLAG says so plainly and points at the Gmail + Calendar connection instead.
+const GOOGLE_BLOCKED = /accounts\.google\.com\/.*(?:rejected|disallowed_useragent|deniedsigninrejected)/i;
 // Pages that mean "not signed in yet"
 const LOGIN_RX = /(\/login|\/signin|\/sign-in|\/sign_in|\/accounts\/login|\/uas\/login|\/checkpoint|\/i\/flow\/login|accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|\/authwall)/i;
 
@@ -102,6 +126,7 @@ function publicView(a) {
   return {
     id: a.id, name: a.name, host: a.host, service: a.service, color: a.color, url: a.url, watch: a.watch !== false,
     state: l.state || (a.watch === false ? 'paused' : 'starting'), unread: l.unread || 0, added: a.added,
+    error: l.error || '',
   };
 }
 
@@ -111,7 +136,19 @@ function push() {
 
 // ---------------------------------------------------------------- browser sessions
 
-const UA = () => session.defaultSession.getUserAgent().replace(/\s(?:plag-shell|Electron)\/\S+/g, '');
+// Sites refuse to sign you in from a browser that calls itself Electron, so account windows say plain Chrome.
+// Built from Electron's own string with every app and Electron marker removed; if that leaves anything odd, a plain
+// Chrome string is used instead.
+function UA() {
+  const raw = session.defaultSession.getUserAgent();
+  const chrome = /Chrome\/([\d.]+)/.exec(raw);
+  const ua = raw.replace(/\s(?:plag-shell|PLAG|Electron)\/\S+/gi, '').replace(/\s{2,}/g, ' ').trim();
+  if (/electron/i.test(ua) || !chrome) {
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) `
+      + `Chrome/${chrome ? chrome[1] : '140.0.0.0'} Safari/537.36`;
+  }
+  return ua;
+}
 
 function sessionFor(a) {
   const ses = session.fromPartition(`persist:acct-${a.id}`);
@@ -174,16 +211,36 @@ function openWindow(a, url) {
     webPreferences: webPrefs(a),
   });
   l.login = w;
+  if (l.error) { l.error = ''; push(); }
   guard(w.webContents, a);
   w.webContents.setUserAgent(UA());
-  w.loadURL(url || a.home);
+  const target = url || a.home;
+  log(a.host, 'opening', target);
+  w.loadURL(target).catch((e) => fail(a, `couldn't open the page: ${e.message}`));
+  w.webContents.on('did-fail-load', (_e, code, desc, failedUrl, isMain) => {
+    if (isMain && code !== -3) fail(a, `${a.host} didn't load (${desc || code})`);  // -3 is a navigation you replaced
+  });
+  w.webContents.on('render-process-gone', (_e, details) => {
+    fail(a, `the ${a.name} window crashed (${details.reason}). Try again; if it keeps happening, tell PLAG.`);
+  });
+  w.webContents.on('did-finish-load', () => log(a.host, 'loaded', w.webContents.getURL().slice(0, 120)));
+  w.once('ready-to-show', () => { w.show(); w.focus(); });
   w.on('page-title-updated', (e, title) => {
     e.preventDefault();
     w.setTitle(`${title} · ${a.name} · PLAG`);
   });
-  w.webContents.on('did-navigate', (_e, u) => { if (stateOf(u) === 'watching' && l.state === 'signin') setState(a, 'starting'); });
+  const watchNav = (_e, u) => {
+    if (GOOGLE_BLOCKED.test(u || '')) {
+      fail(a, 'Google won’t sign in inside an app window. For Gmail, use Connections → Gmail + Calendar instead.');
+      return;
+    }
+    if (stateOf(u) === 'watching' && l.state === 'signin') setState(a, 'starting');
+  };
+  w.webContents.on('did-navigate', watchNav);
+  w.webContents.on('did-navigate-in-page', watchNav);
   w.on('closed', () => {
     l.login = null;
+    log(a.host, 'sign-in window closed');
     if (a.watch !== false) restartWatcher(a); // signed in just now: start watching with the fresh session
   });
 }
@@ -278,8 +335,14 @@ function startWatcher(a) {
     setState(a, stateOf(wc.getURL()));
     setTimeout(() => { l.primed = true; }, 8000);
   });
-  wc.on('did-fail-load', (_e, code, _desc, _url, main) => { if (main && code !== -3) setState(a, 'offline'); });
-  wc.on('render-process-gone', () => { setState(a, 'offline'); setTimeout(() => restartWatcher(a), 30_000); });
+  wc.on('did-fail-load', (_e, code, desc, _url, main) => {
+    if (main && code !== -3) { setState(a, 'offline'); fail(a, `couldn't reach ${a.host} (${desc || code})`); }
+  });
+  wc.on('render-process-gone', (_e, d) => {
+    setState(a, 'offline');
+    fail(a, `the watcher stopped (${d.reason}); trying again in 30 seconds`);
+    setTimeout(() => restartWatcher(a), 30_000);
+  });
   w.loadURL(a.watch_url || a.watchUrl || parse(a.url)?.watch || a.url);
   l.timer = setInterval(() => { if (!w.isDestroyed()) { l.primed = false; w.reload(); } }, RELOAD_MS);
   push();
@@ -288,7 +351,28 @@ function startWatcher(a) {
 // ---------------------------------------------------------------- IPC
 
 function sender(event) {
-  return ctx && ctx.isTrusted(event.senderFrame?.url || '');
+  try {
+    return Boolean(ctx && ctx.isTrusted(event.senderFrame?.url || ''));
+  } catch {
+    return false;  // the frame went away mid-call
+  }
+}
+
+/** An IPC handler whose failures come back as a message the dashboard can show, instead of a silent rejection. */
+function handle(channel, fn) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    if (!sender(event)) {
+      log(channel, 'refused: the call did not come from the PLAG window');
+      return { error: 'That request didn’t come from PLAG.' };
+    }
+    try {
+      return await fn(event, ...args);
+    } catch (e) {
+      const why = (e && e.message) || String(e);
+      log(channel, 'FAILED', why);
+      return { error: `Something went wrong: ${why}` };
+    }
+  });
 }
 
 function accountOf(webContents) {
@@ -306,10 +390,9 @@ function init(options) {
   ctx = options;
   load();
 
-  ipcMain.handle('plag:accounts', (event) => (sender(event) ? accounts.map(publicView) : []));
+  handle('plag:accounts', () => accounts.map(publicView));
 
-  ipcMain.handle('plag:account-add', (event, input) => {
-    if (!sender(event)) return { error: 'denied' };
+  handle('plag:account-add', (_event, input) => {
     const site = parse(input);
     if (!site) return { error: 'That doesn’t look like a website address. Try “linkedin.com”.' };
     if (accounts.length >= MAX_ACCOUNTS) return { error: `PLAG connects up to ${MAX_ACCOUNTS} accounts.` };
@@ -323,8 +406,7 @@ function init(options) {
     return { account: publicView(a) };
   });
 
-  ipcMain.handle('plag:account-open', (event, id, url) => {
-    if (!sender(event)) return false;
+  handle('plag:account-open', (_event, id, url) => {
     const a = accounts.find((x) => x.id === id);
     if (!a) {
       // Gmail through the Google connection: its links open in your normal browser
@@ -344,8 +426,7 @@ function init(options) {
     return true;
   });
 
-  ipcMain.handle('plag:account-watch', (event, id, on) => {
-    if (!sender(event)) return false;
+  handle('plag:account-watch', (_event, id, on) => {
     const a = accounts.find((x) => x.id === id);
     if (!a) return false;
     a.watch = Boolean(on);
@@ -354,8 +435,7 @@ function init(options) {
     return true;
   });
 
-  ipcMain.handle('plag:account-remove', async (event, id) => {
-    if (!sender(event)) return false;
+  handle('plag:account-remove', async (_event, id) => {
     const a = accounts.find((x) => x.id === id);
     if (!a) return false;
     stopWatcher(a);

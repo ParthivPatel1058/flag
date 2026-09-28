@@ -28,8 +28,11 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 // Memory. Measured 2026-09-24 at rest: GPU process ~300 MB, page ~150 MB. PLAG draws two 2D canvases and a few panels:
 // a small GPU tile budget is plenty, V8 favours size over speed, disk caches stay small, and there's no spare renderer.
-app.commandLine.appendSwitch('force-gpu-mem-available-mb', '128');
-app.commandLine.appendSwitch('js-flags', '--optimize-for-size --max-old-space-size=256');
+// 2026-09-28: the old caps (128 MB GPU, 256 MB heap) applied to the connected-account windows too, and a heavy site
+// (LinkedIn, Instagram) would run out of heap and die with a blank window. A cap is a ceiling, not a reservation:
+// V8 still grows only as needed, so raising it costs nothing at rest and lets those sites load.
+app.commandLine.appendSwitch('force-gpu-mem-available-mb', '256');
+app.commandLine.appendSwitch('js-flags', '--optimize-for-size --max-old-space-size=768');
 app.commandLine.appendSwitch('disk-cache-size', String(8 * 1024 * 1024));
 app.commandLine.appendSwitch('disable-features', 'SpareRendererForSitePerProcess,HardwareMediaKeyHandling,MediaSessionService');
 

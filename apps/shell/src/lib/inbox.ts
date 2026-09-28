@@ -75,13 +75,20 @@ export async function addAccount(url: string): Promise<string | null> {
   if (!bridge?.addAccount) return 'Connecting accounts works in the PLAG desktop app.';
   const r = await bridge.addAccount(url);
   if (r.error) return r.error;
+  if (!r.account) return 'PLAG couldn’t open that site. Check the address and try again.';
   useStore.getState().setNotice(`Sign in to ${r.account?.name ?? 'the site'} in the window that opened, then close it. PLAG will start watching for new messages.`);
   return null;
 }
 
-export const openAccount = (a: Account) => window.plag?.openAccount(a.id);
-export const pauseAccount = (a: Account) => window.plag?.watchAccount(a.id, !a.watch);
-export const removeAccount = (a: Account) => window.plag?.removeAccount(a.id);
+/** Anything that comes back with an error shows it on the dashboard instead of failing quietly. */
+async function show<T>(what: Promise<T> | undefined): Promise<void> {
+  const r = (await what) as { error?: string } | boolean | undefined;
+  if (r && typeof r === 'object' && r.error) useStore.getState().setError(r.error);
+}
+
+export const openAccount = (a: Account) => show(window.plag?.openAccount(a.id));
+export const pauseAccount = (a: Account) => show(window.plag?.watchAccount(a.id, !a.watch));
+export const removeAccount = (a: Account) => show(window.plag?.removeAccount(a.id));
 
 /** Addresses offered as one-click chips in the Connect form. */
 export const QUICK_SITES = [

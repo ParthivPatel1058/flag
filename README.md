@@ -206,8 +206,11 @@ to paste and send it yourself: PLAG drafts, it never sends on these accounts. Te
 message saying I'm interested”. Security codes and sign-in alerts are never drafted or read out. Up to 6 accounts are
 watched at once (each is a browser page, ~100–200 MB); pause or disconnect one with its buttons (disconnecting signs
 it out and wipes its cookies). Messages are kept 14 days in `plag.db`. ⚙ Settings → *Inbox agent* turns watching,
-drafting and announcing on or off, and sets your name for replies written as you. Google sometimes refuses to sign in
-inside an app window: then use *Gmail + Calendar* below, which PLAG also checks for new mail every two minutes.
+drafting and announcing on or off, and sets your name for replies written as you. **Google refuses to sign in inside an app window** (“this browser or app may not be secure”), so for Gmail use
+*Gmail + Calendar* below instead: PLAG checks it for new mail every two minutes and it feeds the same Inbox tab.
+Other sites (LinkedIn, Instagram, X, Slack…) sign in normally with your email and password.
+If a site won't connect, its row in Connections shows why, and
+`%LOCALAPPDATA%\PLAG\logs\accounts.log` has the details.
 
 **Gmail + Calendar** (read-only): “check my important emails”, “any new mail?”, “what's my schedule tomorrow”,
 “aaj ka schedule”. One-time setup, done by you because it's tied to your Google account:

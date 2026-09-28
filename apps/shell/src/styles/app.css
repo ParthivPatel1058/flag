@@ -576,6 +576,7 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radi
 .acct-actions { display: inline-flex; align-items: center; gap: 2px; }
 .acct-mini { width: 26px; height: 26px; border-radius: 8px; color: var(--ash-2); font-size: 11px; }
 .acct-mini:hover, .acct-mini:focus-visible { color: var(--bone); background: rgba(238, 239, 232, 0.07); }
+.acct-err { color: var(--warn); }
 .acct-unread { font-style: normal; font-family: var(--mono); font-size: 10px; margin-left: 7px; padding: 0 6px; border-radius: 999px;
   background: var(--lime); color: var(--lime-ink); vertical-align: 1px; }
 .svc {
