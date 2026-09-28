@@ -1054,8 +1054,12 @@ async def keys_save(service: str, req: KeyRequest):
             if not key.startswith("cal_"):
                 return JSONResponse({"error": "bad_key", "message": "A Cal.com key starts with cal_live_ (Settings → Security)."}, status_code=422)
             await calcom.check_key(key)
-    except (TinyFishError, CalError) as e:
-        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+        elif service == "groq":  # checked too: a wrong key used to be saved happily and fail quietly later
+            await groq.check_key(key)
+        elif service == "tavily":
+            await websearch.check_key(key)
+    except (TinyFishError, CalError, ProviderError) as e:
+        return JSONResponse({"error": str(e.code), "message": str(e)}, status_code=422)
     await asyncio.to_thread(set_secret, name, key)
     audit("key.saved", service=service)
     bus.publish("connectors", await asyncio.to_thread(connectors))

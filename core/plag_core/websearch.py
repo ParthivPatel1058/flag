@@ -10,6 +10,7 @@ import time
 
 import httpx
 
+from .gemini import ProviderError
 from .secrets import get_secret
 from .tinyfish import tinyfish
 
@@ -28,6 +29,20 @@ class WebSearch:
 
     def ready(self) -> bool:
         return tinyfish.ready() or (bool(self.key()) and time.time() >= self._rest_until)
+
+    async def check_key(self, key: str) -> None:
+        """Prove a Tavily key works before it's saved. Raises ProviderError."""
+        key = key.strip()
+        try:
+            r = await self._http.post(URL, headers={"Authorization": f"Bearer {key}"},
+                                      json={"query": "PLAG assistant", "max_results": 1})
+        except httpx.HTTPError as e:
+            raise ProviderError("Tavily can't be reached right now. Check the internet and try again.", "offline") from e
+        if r.status_code in (401, 403, 432, 433):
+            raise ProviderError("Tavily didn't accept that key. Copy it again from app.tavily.com.", "bad_key")
+        if r.status_code != 200:
+            raise ProviderError(f"Tavily answered with an error ({r.status_code}). Try again in a minute.", str(r.status_code))
+        self._rest_until = 0.0
 
     async def search(self, query: str, limit: int = 5) -> list[dict]:
         """[{title, url, content, site}] (empty when there's no key or the search failed: callers carry on without it)."""
