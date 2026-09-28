@@ -21,7 +21,7 @@ from . import memory as mem
 from .google import GoogleError, google
 from pathlib import Path
 
-from . import autopilot, calcom as cal, deskagent, documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
+from . import autopilot, brains, calcom as cal, deskagent, documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
 from . import settings as app_settings
 from .elevenlabs import ElevenError, eleven
 from .imagegen import ImageError
@@ -1010,7 +1010,7 @@ class Agent:
                         suspect, deadline = answer, time.monotonic() + 2.5
             if suspect:
                 return suspect
-            raise errors[0] if errors else ProviderError("No AI answered", "unavailable")
+            raise brains.all_failed(errors)
         finally:
             for t in tasks:
                 t.cancel()
@@ -2143,6 +2143,13 @@ class Agent:
             out["reply"] = result.detail if result.ok else _say(lang, f"That didn't go through: {result.detail}", "",
                                                                 f"Nahi ho paaya: {result.detail}")
             out["mood"] = "cheerful" if result.ok else "sorry"
+            if y := (result.data or {}).get("needs_yes"):
+                # the job carried on and hit another risky button: its own card, so the next "yes" has something to answer
+                nxt = approvals.create("computer_continue", {"session": y["session"], "label": y["label"]},
+                                       {"name": "On this laptop", "message": y["summary"]}, lang)
+                out["approval"] = {"id": nxt.id, "kind": "computer", "name": f"In {y['where']}", "phone_tail": "",
+                                   "message": y["summary"], "expires_in": approvals.TTL_SECONDS}
+                out["expects_reply"], out["mood"] = True, "curious"
         elif result.ok and mode == "desktop":
             out["reply"] = _say(lang, f"Sent to {name}, sir.", f"{name} को भेज दिया।", f"{name} ko bhej diya.")
         elif result.ok:

@@ -17,6 +17,7 @@ nvidia_llm_api_key_2 and nvidia_api_key. A key that's refused or rate-limited ha
 """
 
 import json
+import logging
 import re
 import time
 
@@ -28,21 +29,64 @@ from .secrets import get_secret
 URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 MUSE = "meta/muse-glimmer-30b"
 GLM = "z-ai/glm-5.3-flash"
-MODELS = [GLM, MUSE, "openai/gpt-oss-20b", "mistralai/mistral-nemotron"]
+# 2026-09-28: mistralai/mistral-nemotron answers 410 Gone (NVIDIA retired it), so it's out. A model that answers
+# 404 or 410 is dropped for the rest of the session anyway (_failed), so a retirement never keeps costing time.
+MODELS = [GLM, MUSE, "openai/gpt-oss-20b"]
+RETIRED = {"404", "410"}  # gone for good, not a passing error
 MODEL_KEYS = {MUSE: "nvidia_muse_api_key", GLM: "nvidia_glm_api_key"}
 SHARED_KEYS = ["nvidia_llm_api_key", "nvidia_llm_api_key_2", "nvidia_api_key"]
 KEYS = [*MODEL_KEYS.values(), *SHARED_KEYS]
 _COMMAND_KEYS = "transcript, language, actions, reply, mood"
+log = logging.getLogger("plag.nvidia")
 _NO_THINKING = {"thinking": False, "enable_thinking": False}  # GLM and Muse: answer straight away
 
 
 def _json_from(content: str) -> dict:
-    content = re.sub(r"<think>.*?</think>", "", content or "", flags=re.S)
+    """The JSON object in a model's answer, however it wrapped it.
+
+    These models think out loud first. Their reasoning arrives inside <think> tags, or in a separate
+    "reasoning_content" field with the answer after it, and a long think can push the answer past the token limit
+    and cut it off mid-object. So: drop the thinking, take the outermost {...}, and close an unfinished one.
+    """
+    content = re.sub(r"<think\b.*?</think>", "", content or "", flags=re.S | re.I)
+    content = re.sub(r"<think\b.*", "", content, flags=re.S | re.I)  # it ran out of tokens while still thinking
     content = re.sub(r"^```(?:json)?|```$", "", content.strip(), flags=re.M).strip()
-    start, end = content.find("{"), content.rfind("}")
-    if start == -1 or end == -1:
-        raise ProviderError("NVIDIA model returned no JSON", "bad_output")
-    return json.loads(content[start:end + 1])
+    start = content.find("{")
+    if start == -1:
+        raise ProviderError("the model answered without any JSON", "bad_output")
+    end = content.rfind("}")
+    if end > start:
+        try:
+            return json.loads(content[start:end + 1])
+        except ValueError:
+            pass
+    return _repair(content[start:])
+
+
+def _repair(text: str) -> dict:
+    """A JSON object cut off by the token limit: close the strings, arrays and braces it left open."""
+    out, in_string, escaped, stack = [], False, False, []
+    for ch in text:
+        out.append(ch)
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            escaped = True
+        elif ch == '"':
+            in_string = not in_string
+        elif not in_string:
+            if ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]" and stack:
+                stack.pop()
+    if in_string:
+        out.append('"')
+    mended = "".join(out).rstrip().rstrip(",") + "".join(reversed(stack))
+    try:
+        return json.loads(mended)
+    except ValueError as e:
+        raise ProviderError("the model's answer was cut off before it finished", "bad_output") from e
 
 
 class Nvidia:
@@ -75,6 +119,10 @@ class Nvidia:
 
     def _failed(self, model: str, why: str, t0: float) -> None:
         self.health = {"ok": False, "ms": int((time.perf_counter() - t0) * 1000), "at": time.time(), "error": why, "model": model}
+        if why in RETIRED:  # NVIDIA has taken this model down: stop asking for it
+            self._rest_until[model] = time.time() + 10 * 365 * 86400
+            log.warning("NVIDIA has retired %s (HTTP %s); PLAG won't use it again", model, why)
+            return
         self._fails[model] = self._fails.get(model, 0) + 1
         if self._fails[model] >= 2:
             self._rest_until[model], self._fails[model] = time.time() + 300, 0
@@ -94,6 +142,11 @@ class Nvidia:
         messages = [{"role": "system", "content": f"{system}\n\nOutput ONLY one JSON object with the keys {wanted}. No markdown."}]
         messages += [{"role": "assistant" if role == "model" else "user", "content": t} for role, t in history]
         messages.append({"role": "user", "content": text})
+        # GLM and Muse think before answering, and on NVIDIA that is the default. The switch below asks them not to,
+        # but when it's ignored the reasoning eats the budget and the answer never arrives ("no JSON"), so they always
+        # get room for both.
+        if model in MODEL_KEYS:
+            max_tokens = max(max_tokens, 4000 if think else 2000)
         body = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens, "stream": False}
         if model.startswith("openai/gpt-oss"):
             body["reasoning_effort"] = "medium" if think else "low"  # "low" keeps its reasoning to a sentence or two
@@ -123,7 +176,13 @@ class Nvidia:
             self._failed(model, str(code), t0)
             raise ProviderError(f"{model} HTTP {code}", code)
         try:
-            obj = _json_from(r.json()["choices"][0]["message"].get("content") or "")
+            message = r.json()["choices"][0]["message"]
+            # the answer is in "content"; when a model puts its thinking in "reasoning_content" and runs out of room,
+            # content is empty and the JSON (if any) is at the end of the reasoning
+            obj = _json_from(message.get("content") or message.get("reasoning_content") or "")
+        except ProviderError as e:
+            self._failed(model, "bad_output", t0)
+            raise ProviderError(f"{model}: {e}", "bad_output") from e
         except (KeyError, IndexError, ValueError) as e:
             self._failed(model, "bad_output", t0)
             raise ProviderError(f"{model} answer unreadable", "bad_output") from e

@@ -104,7 +104,7 @@ function ApprovalCard() {
   }, [a]);
   if (!a) return null;
   return (
-    <div className="approval" role="dialog" aria-label={a.kind === 'calendar' ? a.name : `Send WhatsApp message to ${a.name}`}>
+    <div className="approval" role="dialog" aria-label={a.kind === 'whatsapp' ? `Send WhatsApp message to ${a.name}` : a.name}>
       <div className="ap-head">
         {a.kind === 'calendar' ? <CalendarIcon /> : a.kind === 'computer' ? <KeyboardIcon /> : <WhatsAppIcon />}
         {a.kind === 'whatsapp' ? <span>WhatsApp to <b>{a.name}</b></span> : <span><b>{a.name}</b></span>}

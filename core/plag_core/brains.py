@@ -20,6 +20,24 @@ from .nvidia import MODEL_KEYS, nvidia
 THINKERS = set(MODEL_KEYS)  # GLM 5.3 Flash and Muse
 
 
+def all_failed(errors: list[Exception]) -> ProviderError:
+    """Every brain failed: one plain sentence for the user, with the reasons kept for the logs.
+
+    Never the raw provider error ("mistralai/mistral-nemotron HTTP 410"): that told the user nothing they could act on.
+    """
+    reasons = [str(e) for e in errors][:4]
+    codes = {str(getattr(e, "code", "")) for e in errors}
+    if codes & {"no_key"}:
+        return ProviderError("No AI is set up yet. Add your Gemini key (and Groq, which is free) in ⚙ Settings → Keys.",
+                             "no_key", reasons)
+    if codes & {"offline"}:
+        return ProviderError("I can't reach the AI right now. Check the internet connection, sir.", "offline", reasons)
+    if codes & {"quota_day", "429"}:
+        return ProviderError("Today's free AI limit is used up. Add a Groq key in ⚙ Settings → Keys, it's free.",
+                             "quota", reasons)
+    return ProviderError("The AI didn't answer just now, sir. Try again in a moment.", "unavailable", reasons)
+
+
 async def race(system: str, schema: dict, text: str, *, history: list[tuple[str, str]] | None = None,
                deep: bool = False, accept: Callable[[dict], bool] = lambda o: bool(o), timeout: float = 25.0,
                grace: float = 8.0, max_tokens: int = 700, route: str = "turn",
@@ -72,4 +90,4 @@ async def race(system: str, schema: dict, text: str, *, history: list[tuple[str,
             t.cancel()
     if best:
         return best
-    raise errors[0] if errors and isinstance(errors[0], ProviderError) else ProviderError("No AI answered in time", "timeout")
+    raise all_failed(errors)

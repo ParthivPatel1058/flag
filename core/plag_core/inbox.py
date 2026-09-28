@@ -252,9 +252,9 @@ async def draft(item: dict, instruction: str = "") -> dict:
         for finished in asyncio.as_completed(racers, timeout=20):
             try:
                 model, obj, _ = await finished
-            except ProviderError:
+            except Exception:  # one brain failing must not stop the rest of the race
                 continue
-            if obj.get("summary"):
+            if isinstance(obj, dict) and obj.get("summary"):
                 got = obj
                 break
     except TimeoutError:

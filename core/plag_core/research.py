@@ -89,7 +89,11 @@ async def _news(topic: str) -> list[dict]:
             break
     if len(items) < MAX_SOURCES and tinyfish.ready():
         # TinyFish's news search: more outlets than Google News alone finds
-        for it in await tinyfish.search(topic, MAX_SOURCES, news=True):
+        try:
+            extra = await tinyfish.search(topic, MAX_SOURCES, news=True)
+        except Exception:
+            extra = []  # an optional top-up: never lose the headlines already found
+        for it in extra:
             key = re.sub(r"\W+", " ", it["title"].casefold()).strip()
             if it["title"] and key not in seen:
                 seen.add(key)
