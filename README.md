@@ -133,6 +133,11 @@ banao”) uses the camera: Gemini describes what you're showing and FLUX draws i
 (NVIDIA's hosted editing models only accept its own sample images). Every image is saved to `Pictures\PLAG` and shown
 on the dashboard with Open / Show in folder. Key: Credential Manager, `PLAG / nvidia_image_api_key`.
 
+**The left column is four sections**, picked with the buttons at its top (PLAG remembers which one you last used):
+*Usage* (CPU, memory, disk, network and the heaviest apps), *Climate* (now and the next two days where you are, from
+Open-Meteo), *Time* (a live clock and your next reminder) and *News* (today's headlines, the same sources PLAG's
+reports use). Each has a button that hands the topic to PLAG out loud.
+
 **Computer use: PLAG working in your apps.** ⚙ Settings → *Computer use* (off until you turn it on). Then jobs that
 need an app's own screen are done by PLAG itself: “in Word, change the phone number in my resume to …”, “total column C
 in Excel”, “rename these files”, “fill this form with my details”. It reads each window through Windows' accessibility

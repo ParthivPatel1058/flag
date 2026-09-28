@@ -899,6 +899,62 @@ async def tts(req: SpeakRequest):
     return Response(wav, media_type="audio/wav", headers={"X-PLAG-Cache": "hit" if cached else "miss"})
 
 
+# ---------------------------------------------------------------- the left panel's sections (weather, news)
+
+_panel: dict[str, tuple[float, dict]] = {}  # answers kept a while: the panel asks again whenever you open its tab
+
+
+async def _cached(name: str, seconds: float, make):
+    hit = _panel.get(name)
+    if hit and time.time() - hit[0] < seconds:
+        return hit[1]
+    out = await make()
+    _panel[name] = (time.time(), out)
+    return out
+
+
+@app.get("/v1/panel/weather")
+async def panel_weather(city: str = ""):
+    """Today and tomorrow where you are (or your city from Settings), for the Weather tab."""
+    async def make():
+        want = " ".join((city or app_settings.get()["home_city"]).split())[:60]
+        here = None
+        if not want and location.enabled():
+            try:
+                here = await location.place()
+            except location.LocationError:
+                here = None
+        if not want and not here:
+            return {"error": "no_city", "message": "Tell PLAG your city in Settings, or turn on Location."}
+        try:
+            f = await (weather.forecast(want) if want else
+                       weather.forecast(lat=here["lat"], lon=here["lon"], name=here.get("city") or "your location"))
+        except weather.WeatherError as e:
+            return {"error": e.code, "message": str(e)}
+        sky, _hi, _mx = weather.describe(f["now"]["code"])
+        days = []
+        for d in f["days"][:3]:
+            s_en, _h, _m = weather.describe(d["code"])
+            days.append({"date": d["date"], "high": d["high"], "low": d["low"], "rain": d["rain"], "sky": s_en})
+        return {"place": f["place"], "now": {**f["now"], "sky": sky}, "days": days}
+    return await _cached(f"weather:{city}", 600, make)
+
+
+@app.get("/v1/panel/news")
+async def panel_news(topic: str = ""):
+    """Headlines for the News tab (the same sources PLAG's reports use)."""
+    from .research import ResearchError, _news
+
+    async def make():
+        try:
+            items = await _news(topic.strip()[:80] or "top news in India")
+        except ResearchError as e:
+            return {"error": e.code, "message": str(e), "items": []}
+        return {"items": [{"title": i["title"], "source": i["source"], "link": i["link"], "date": i["date"]}
+                          for i in items[:8]]}
+    return await _cached(f"news:{topic}", 900, make)
+
+
 @app.get("/v1/location/now")
 async def location_now():
     """Where the laptop is right now, for the live map while navigating (asked every ~15 s, only during a trip)."""

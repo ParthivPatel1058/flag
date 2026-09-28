@@ -4,7 +4,8 @@ import type { OrbState } from 'thinking-orbs';
 import { langTag, mb, pct, rate, secs } from '../lib/format';
 import { cancelReminder, connectGoogle, deleteMemory, disconnectGoogle, resumePlag, sendText } from '../lib/voice';
 import {
-  QUICK_SITES, addAccount, copyReply, dismiss, markDone, openAccount, openItem, pauseAccount, redraft, removeAccount,
+  QUICK_SITES, addAccount, copyReply, dismiss, loadNews, loadWeather, markDone, openAccount, openItem, pauseAccount,
+  redraft, removeAccount, type PanelNews, type PanelWeather,
 } from '../lib/inbox';
 import { TrashIcon } from './icons';
 import { useStore, type Account, type Connector, type InboxItem } from '../state/store';
@@ -58,17 +59,14 @@ function Metric(props: { label: string; value: string; unit?: string; sub?: stri
   );
 }
 
-export function VitalsPanel() {
+function VitalsView() {
   const m = useStore((s) => s.metrics);
   const series = useStore((s) => s.series);
   const procs = useStore((s) => s.procs);
   const busy = useStore((s) => s.pending || s.halted || !s.coreUp);
   return (
-    <section className="panel vitals" aria-labelledby="vitals-h">
-      <header className="panel-h">
-        <h2 id="vitals-h">This laptop</h2>
-        <span className={`live ${m ? 'on' : ''}`}>{m ? 'Live' : 'Waiting'}</span>
-      </header>
+    <>
+      <div className="side-live"><span className={`live ${m ? 'on' : ''}`}>{m ? 'Live' : 'Waiting'}</span></div>
       <Metric label="CPU" value={pct(m?.cpu)} unit="%" series={series.cpu} max={100} warn={(m?.cpu ?? 0) >= 80}
         sub={m?.cpu_freq ? `${(m.cpu_freq.current / 1000).toFixed(1)} GHz · ${m.cores} threads` : ''} />
       <Metric label="Memory" value={pct(m?.mem.pct)} unit="%" series={series.mem} max={100} warn={(m?.mem.pct ?? 0) >= 85}
@@ -101,6 +99,143 @@ export function VitalsPanel() {
       <button className="ghost-btn" disabled={busy} onClick={() => void sendText('why is my laptop slow')}>
         Why is it slow?
       </button>
+    </>
+  );
+}
+
+const DAY = (iso: string) => {
+  const d = new Date(iso);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  return d.toLocaleDateString([], { weekday: 'short' });
+};
+
+function WeatherView() {
+  const [w, setW] = useState<PanelWeather | null>(null);
+  useEffect(() => {
+    void loadWeather().then(setW);
+    const id = window.setInterval(() => void loadWeather().then(setW), 10 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  if (!w) return <p className="empty">Reading the forecast…</p>;
+  if (w.error || !w.now) {
+    return (
+      <>
+        <p className="empty">{w.message ?? 'No forecast right now.'}</p>
+        <button className="ghost-btn" onClick={() => void sendText("what's the weather")}>Ask PLAG anyway</button>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="wx-now">
+        <span className="wx-place">{w.place}</span>
+        <span className="wx-temp">{Math.round(w.now.temp)}<small>°C</small></span>
+        <span className="wx-sky">{w.now.sky}</span>
+        <span className="wx-sub mono">Feels {Math.round(w.now.feels)}° · {w.now.humidity}% humidity · {Math.round(w.now.wind)} km/h</span>
+      </div>
+      <ul className="wx-days">
+        {(w.days ?? []).map((d) => (
+          <li key={d.date}>
+            <span className="wx-day">{DAY(d.date)}</span>
+            <span className="wx-desc">{d.sky}</span>
+            <span className="wx-rain mono">{d.rain}%</span>
+            <span className="wx-hl mono">{Math.round(d.high)}° <em>{Math.round(d.low)}°</em></span>
+          </li>
+        ))}
+      </ul>
+      <button className="ghost-btn" onClick={() => void sendText('will it rain tomorrow')}>Will it rain tomorrow?</button>
+    </>
+  );
+}
+
+function ClockView() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const reminders = useStore((s) => s.reminders);
+  const next = reminders.length ? reminders.slice().sort((a, b) => a.due.localeCompare(b.due))[0] : null;
+  return (
+    <>
+      <div className="clock">
+        <span className="clock-time">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+        <span className="clock-sec mono">{now.toLocaleTimeString([], { second: '2-digit' })}s</span>
+        <span className="clock-date">{now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+      </div>
+      <h3 className="sub-h">Next reminder</h3>
+      {next ? (
+        <p className="clock-next">{next.text}<span className="mono">{when(next.due)}</span></p>
+      ) : (
+        <p className="empty">Nothing set. Say “PLAG, remind me at 7 pm to call mom”.</p>
+      )}
+      <button className="ghost-btn" onClick={() => void sendText('what are my reminders')}>Read my reminders</button>
+    </>
+  );
+}
+
+function NewsView() {
+  const [n, setN] = useState<PanelNews | null>(null);
+  useEffect(() => {
+    void loadNews().then(setN);
+    const id = window.setInterval(() => void loadNews().then(setN), 15 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  if (!n) return <p className="empty">Fetching headlines…</p>;
+  if (!n.items.length) return <p className="empty">{n.message ?? 'No headlines right now.'}</p>;
+  return (
+    <>
+      <ul className="news-list">
+        {n.items.map((it) => (
+          <li key={it.link || it.title}>
+            <a href={it.link} target="_blank" rel="noreferrer" title={it.title}>{it.title}</a>
+            <span className="mono">{it.source}{it.date ? ` · ${it.date}` : ''}</span>
+          </li>
+        ))}
+      </ul>
+      <button className="ghost-btn" onClick={() => void sendText('tell me the news')}>PLAG, brief me on this</button>
+    </>
+  );
+}
+
+const SIDE_TABS = [
+  { id: 'usage', label: 'Usage', title: 'This laptop: CPU, memory, disk, network' },
+  { id: 'weather', label: 'Climate', title: 'Weather where you are' },
+  { id: 'time', label: 'Time', title: 'The clock and your next reminder' },
+  { id: 'news', label: 'News', title: "Today's headlines" },
+] as const;
+type SideTab = (typeof SIDE_TABS)[number]['id'];
+
+/** The left column: one section at a time, chosen with the buttons at the top. */
+export function VitalsPanel() {
+  const [tab, setTab] = useState<SideTab>(() => {
+    try {
+      const saved = localStorage.getItem('plag.side');
+      return (SIDE_TABS.some((t) => t.id === saved) ? saved : 'usage') as SideTab;
+    } catch {
+      return 'usage';
+    }
+  });
+  const pick = (id: SideTab) => {
+    setTab(id);
+    try {
+      localStorage.setItem('plag.side', id);
+    } catch {
+      /* storage off: the choice lasts this session */
+    }
+  };
+  return (
+    <section className="panel vitals" aria-label="This laptop, weather, time and news">
+      <header className="panel-h tabs side-tabs" role="tablist">
+        {SIDE_TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} title={t.title}
+            className={tab === t.id ? 'on' : ''} onClick={() => pick(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </header>
+      {tab === 'usage' ? <VitalsView /> : tab === 'weather' ? <WeatherView /> : tab === 'time' ? <ClockView /> : <NewsView />}
     </section>
   );
 }

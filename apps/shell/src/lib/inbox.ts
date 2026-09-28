@@ -94,3 +94,34 @@ export const QUICK_SITES = [
   { label: 'Slack', url: 'app.slack.com' },
   { label: 'Discord', url: 'discord.com' },
 ];
+
+// ---------------------------------------------------------------- the left panel's sections
+
+export interface PanelWeather {
+  place?: string;
+  now?: { temp: number; feels: number; humidity: number; wind: number; sky: string };
+  days?: { date: string; high: number; low: number; rain: number; sky: string }[];
+  error?: string;
+  message?: string;
+}
+export interface PanelNews {
+  items: { title: string; source: string; link: string; date: string }[];
+  error?: string;
+  message?: string;
+}
+
+export async function loadWeather(): Promise<PanelWeather | null> {
+  try {
+    return await call<PanelWeather>('/v1/panel/weather');
+  } catch {
+    return null;
+  }
+}
+
+export async function loadNews(): Promise<PanelNews | null> {
+  try {
+    return await call<PanelNews>('/v1/panel/news');
+  } catch {
+    return null;
+  }
+}

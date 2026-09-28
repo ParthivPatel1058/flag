@@ -514,6 +514,41 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radi
 .item-del { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--ash-2); }
 .item-del:hover, .item-del:focus-visible { color: var(--bad); background: rgba(255, 90, 78, 0.1); }
 
+/* ------------------------------------------------------------------ the left column's sections */
+.vitals { overflow-y: auto; }
+.side-tabs { margin-bottom: 6px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
+.side-live { display: flex; justify-content: flex-end; margin: -2px 0 2px; }
+
+.wx-now { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 14px; }
+.wx-place { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ash); }
+.wx-temp { font-size: 52px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.wx-temp small { font-size: 18px; font-weight: 500; color: var(--ash); margin-left: 2px; }
+.wx-sky { font-size: 15px; color: var(--bone-2); margin-top: 2px; }
+.wx-sub { font-size: 11px; color: var(--ash-2); margin-top: 4px; }
+.wx-days { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.wx-days li {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) 34px auto; gap: 8px; align-items: baseline;
+  padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.wx-day { color: var(--bone-2); font-weight: 500; }
+.wx-desc { color: var(--ash); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-rain { font-size: 11px; color: var(--iris); text-align: right; }
+.wx-hl { font-size: 12px; color: var(--bone-2); }
+.wx-hl em { font-style: normal; color: var(--ash-2); }
+
+.clock { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 0 18px; }
+.clock-time { font-size: 46px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.clock-sec { font-size: 12px; color: var(--lime); margin-top: 2px; }
+.clock-date { font-size: 13.5px; color: var(--ash); margin-top: 6px; }
+.clock-next { display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; color: var(--bone-2); line-height: 1.35; }
+.clock-next .mono { font-size: 11px; color: var(--lime); }
+
+.news-list { display: flex; flex-direction: column; }
+.news-list li { display: flex; flex-direction: column; gap: 3px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.news-list a { font-size: 13px; line-height: 1.35; color: var(--bone-2); text-decoration: none; }
+.news-list a:hover { color: var(--lime); }
+.news-list .mono { font-size: 10.5px; color: var(--ash-2); }
+
 /* ------------------------------------------------------------------ accounts and the inbox agent */
 .conns { overflow-y: auto; padding-right: 10px; }
 .conns .conn-list { overflow: visible; margin-right: 0; padding-right: 0; }
