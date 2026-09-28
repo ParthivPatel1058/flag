@@ -19,7 +19,6 @@ import logging
 import re
 import sqlite3
 import threading
-import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -27,7 +26,7 @@ from datetime import datetime, timedelta
 from .audit import audit
 from .bus import bus
 from .config import DATA_DIR, MODELS
-from .gemini import ProviderError, gemini
+from .gemini import gemini
 from .groq import groq
 from .nvidia import nvidia
 from . import settings as app_settings
