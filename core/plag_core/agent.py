@@ -828,7 +828,7 @@ class Agent:
                     transcript, model = said, heard_by.lower()
                     step("understand", "done", f"{heard_by} · fast path", int((time.perf_counter() - t1) * 1000))
                 else:
-                    # already heard: send the words, not the audio (faster, and Gemma can help)
+                    # already heard: send the words, not the audio (faster, and the NVIDIA models can help)
                     text, audio, transcript = said, None, said
         if not intents:
             model, obj, ms = await self._think(lang_pref, audio, text)
@@ -889,18 +889,13 @@ class Agent:
         return out
 
     async def _think(self, lang_pref: str, audio: bytes | None, text: str | None) -> tuple[str, dict, int]:
-        """Ask the AI brains. For text, Gemini, Gemma and the NVIDIA models race: the first good answer wins, the rest
-        are cancelled."""
+        """Ask the AI brains. For text, Gemini and the NVIDIA models (GLM 5.3 Flash, Muse, gpt-oss, mistral-nemotron)
+        race: the first good answer wins, the rest are cancelled."""
         system, history = system_prompt(lang_pref, self.context()), list(self.history)
         if audio is not None:  # raw audio (Whisper heard nothing usable): only Gemini can listen
             return await gemini.turn(system=system, schema=SCHEMA, history=history, audio_wav=audio)
-        gemma = [m for m in MODELS["turn"] if m.startswith("gemma")]
-        racers = [
-            gemini.turn(system=system, schema=SCHEMA, history=history, text=text,
-                        models=[m for m in MODELS["turn"] if m not in gemma]),
-            gemini.turn(system=system, schema=SCHEMA, history=history, text=text, models=gemma),
-        ]
-        for m in nvidia.models():  # gpt-oss-20b and mistral-nemotron on NVIDIA, each its own racer
+        racers = [gemini.turn(system=system, schema=SCHEMA, history=history, text=text, models=MODELS["turn"])]
+        for m in nvidia.models():  # each NVIDIA model is its own racer
             racers.append(nvidia.turn(system=system, history=history, text=text or "", model=m))
         if groq.ready():  # open-source models on Groq: usually first by a wide margin when a key is set
             racers.append(groq.turn(system=system, history=history, text=text or "", schema=SCHEMA))
@@ -1418,7 +1413,7 @@ class Agent:
     async def _write(self, kind: str, topic: str, length: str, lang: str, task_id: str, step, out: dict) -> dict:
         """Full writing power: an essay, article, report, letter or story, written out and saved as a PDF. No browser."""
         bus.publish("status.changed", {"state": "executing"}, task_id)
-        step("act", "running", f"Writing the {kind} (Gemini and Gemma race; the best finished draft wins)")
+        step("act", "running", f"Writing the {kind} (Gemini, GLM and Muse race; the first finished draft wins)")
         t = time.perf_counter()
         out["action"] = {**out.get("action", {}), "type": "write", "label": "Writing", "kind": kind, "topic": topic}
         if DRY_RUN:

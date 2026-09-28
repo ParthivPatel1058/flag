@@ -1,15 +1,19 @@
-"""Open models on NVIDIA NIM (OpenAI-compatible API), raced against Gemini and Gemma: the first good answer wins.
+"""Open models on NVIDIA NIM (OpenAI-compatible API), raced against Gemini: the first good answer wins.
 
 Measured 2026-09-24 with the user's keys (PLAG-style commands, 2 rounds, JSON checked for the right action):
-  openai/gpt-oss-20b            6/6 right, median 1.5 s     <- PLAG's pick (reasoning_effort low)
-  mistralai/mistral-nemotron    6/6 right, median 2.8 s     <- backup while gpt-oss rests
+  openai/gpt-oss-20b            6/6 right, median 1.5 s     (reasoning_effort low)
+  mistralai/mistral-nemotron    6/6 right, median 2.8 s
   meta/muse-glimmer-30b         always reasons first: 14-60 s a reply, too slow to speak
-  z-ai/glm-5.3-flash (the old pick), kimi-k3, gemma-4-31b, deepseek-v4.1-flash, nemotron-3.5-lightning: nothing in 30 s
+  z-ai/glm-5.3-flash, kimi-k3, gemma-4-31b, deepseek-v4.1-flash, nemotron-3.5-lightning: nothing in 30 s
 With PLAG's full prompt (10k characters) both swung between ~1.5 and 11 s, so PLAG races both. A model that fails
 twice in a row rests for five minutes.
 
-Keys: Windows Credential Manager, PLAG / nvidia_llm_api_key, then nvidia_llm_api_key_2, then nvidia_api_key. A key
-that's refused or rate-limited hands the request to the next one.
+2026-09-28: Muse (Meta) and GLM 5.3 Flash replace Gemma as PLAG's general-purpose brains (commands, answers, news
+briefs, writing), each with its own key. Both are asked to answer without a long reasoning pass first (the reason
+they were too slow on 2026-09-24); if one is still slow, the race simply goes to whoever answers first.
+
+Keys: Windows Credential Manager. Each model's own key first (MODEL_KEYS), then PLAG / nvidia_llm_api_key,
+nvidia_llm_api_key_2 and nvidia_api_key. A key that's refused or rate-limited hands the request to the next one.
 """
 
 import json
@@ -22,9 +26,14 @@ from .gemini import ProviderError
 from .secrets import get_secret
 
 URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODELS = ["openai/gpt-oss-20b", "mistralai/mistral-nemotron"]
-KEYS = ["nvidia_llm_api_key", "nvidia_llm_api_key_2", "nvidia_api_key"]
+MUSE = "meta/muse-glimmer-30b"
+GLM = "z-ai/glm-5.3-flash"
+MODELS = [GLM, MUSE, "openai/gpt-oss-20b", "mistralai/mistral-nemotron"]
+MODEL_KEYS = {MUSE: "nvidia_muse_api_key", GLM: "nvidia_glm_api_key"}
+SHARED_KEYS = ["nvidia_llm_api_key", "nvidia_llm_api_key_2", "nvidia_api_key"]
+KEYS = [*MODEL_KEYS.values(), *SHARED_KEYS]
 _COMMAND_KEYS = "transcript, language, actions, reply, mood"
+_NO_THINKING = {"thinking": False, "enable_thinking": False}  # GLM and Muse: answer straight away
 
 
 def _json_from(content: str) -> dict:
@@ -44,13 +53,22 @@ class Nvidia:
         self._rest_until: dict[str, float] = {}
 
     @staticmethod
-    def _keys() -> list[str]:
-        return [k for k in (get_secret(n) for n in KEYS) if k]
+    def _keys(model: str | None = None) -> list[str]:
+        """The keys to try for `model`: its own first, then the shared ones (no duplicates)."""
+        names = ([MODEL_KEYS[model]] if model in MODEL_KEYS else []) + SHARED_KEYS
+        if model is None:
+            names = KEYS
+        keys: list[str] = []
+        for k in (get_secret(n) for n in names):
+            if k and k not in keys:
+                keys.append(k)
+        return keys
 
     def models(self) -> list[str]:
-        """The models that aren't resting. PLAG races all of them: with its full prompt each one swung between 1.5 s
-        and 11 s (2026-09-24), so the first to answer is usually much faster than any single one."""
-        return [m for m in MODELS if time.time() >= self._rest_until.get(m, 0)] if self._keys() else []
+        """The models that have a key and aren't resting. PLAG races all of them: with its full prompt each one swung
+        between 1.5 s and 11 s (2026-09-24), so the first to answer is usually much faster than any single one."""
+        now = time.time()
+        return [m for m in MODELS if now >= self._rest_until.get(m, 0) and self._keys(m)]
 
     def ready(self) -> bool:
         return bool(self.models())
@@ -62,10 +80,11 @@ class Nvidia:
             self._rest_until[model], self._fails[model] = time.time() + 300, 0
 
     async def turn(self, *, system: str, history: list[tuple[str, str]], text: str, schema: dict | None = None,
-                   max_tokens: int = 700, model: str | None = None) -> tuple[str, dict, int]:
+                   max_tokens: int = 700, model: str | None = None, timeout: float | None = None) -> tuple[str, dict, int]:
         """One JSON answer with the keys of `schema` (PLAG's command shape by default), from `model` or the first
-        one that isn't resting."""
-        keys, model = self._keys(), model or next(iter(self.models()), None)
+        one that isn't resting. `timeout` is for long answers (writing); racers keep the short default."""
+        model = model or next(iter(self.models()), None)
+        keys = self._keys(model) if model else []
         if not keys or not model:
             raise ProviderError("NVIDIA models are resting or no key is saved", "unavailable")
         wanted = ", ".join(((schema or {}).get("properties") or {}).keys()) or _COMMAND_KEYS
@@ -75,11 +94,15 @@ class Nvidia:
         body = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens, "stream": False}
         if model.startswith("openai/gpt-oss"):
             body["reasoning_effort"] = "low"  # it reasons briefly first; "low" keeps that to a sentence or two
+        elif model in MODEL_KEYS:
+            body["chat_template_kwargs"] = _NO_THINKING
+            body["reasoning_effort"] = "low"
         t0 = time.perf_counter()
         r = None
         for key in keys:
             try:
-                r = await self._http.post(URL, headers={"Authorization": f"Bearer {key}"}, json=body)
+                r = await self._http.post(URL, headers={"Authorization": f"Bearer {key}"}, json=body,
+                                          timeout=httpx.Timeout(timeout, connect=5.0) if timeout else httpx.USE_CLIENT_DEFAULT)
             except httpx.TimeoutException as e:
                 self._failed(model, "timeout", t0)
                 raise ProviderError(f"{model} timed out", "timeout") from e

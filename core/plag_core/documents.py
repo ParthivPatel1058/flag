@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import drafts
 from .gemini import ProviderError, gemini
+from .nvidia import GLM, MUSE, nvidia
 from .research import _documents
 
 WRITING = _documents() / "PLAG" / "Writing"
@@ -144,7 +145,7 @@ WRITE_SCHEMA = {"type": "OBJECT", "properties": {"title": {"type": "STRING"}, "s
                                                  "markdown": {"type": "STRING"}}, "required": ["title", "summary", "markdown"]}
 # the strongest models first: this is where writing quality matters more than a second of speed
 WRITE_MODELS = ["gemini-flash-latest", "gemini-3.7-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"]
-GEMMA = ["gemma-4-26b-a4b-it"]
+NVIDIA_WRITERS = (GLM, MUSE)  # replaced Gemma as the writers racing Gemini (2026-09-28)
 
 
 async def write(kind: str, topic: str, lang: str = "en", length: str = "") -> dict:
@@ -159,10 +160,12 @@ async def write(kind: str, topic: str, lang: str = "en", length: str = "") -> di
               f"and its main point), markdown (the full text in Markdown: '## ' headings, paragraphs, '- ' lists, **bold**; "
               f"no title line, no links, no images, no tables).")
     t0 = asyncio.get_running_loop().time()
-    racers = [asyncio.create_task(gemini.turn(system=system, schema=WRITE_SCHEMA, history=[], text=f"Write: {kind} about {topic}",
-                                              models=WRITE_MODELS, route="write")),
-              asyncio.create_task(gemini.turn(system=system, schema=WRITE_SCHEMA, history=[], text=f"Write: {kind} about {topic}",
-                                              models=GEMMA, route="write"))]
+    ask = f"Write: {kind} about {topic}"
+    racers = [asyncio.create_task(gemini.turn(system=system, schema=WRITE_SCHEMA, history=[], text=ask,
+                                              models=WRITE_MODELS, route="write"))]
+    racers += [asyncio.create_task(nvidia.turn(system=system, history=[], text=ask, schema=WRITE_SCHEMA, model=m,
+                                               max_tokens=4000, timeout=75.0))
+               for m in nvidia.models() if m in NVIDIA_WRITERS]
     obj, model = None, ""
     try:
         for finished in asyncio.as_completed(racers):

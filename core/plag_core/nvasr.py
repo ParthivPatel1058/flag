@@ -8,8 +8,9 @@ Whisper base, which also garbled Hinglish ("OME کو message page 2K-10 minute")
 itself (and was the fastest of hi-IN / en-US / multi). Hindi comes back in Devanagari and is turned into Hinglish in
 Latin letters (hinglish.to_latin), the way you write it.
 
-Key: Windows Credential Manager, PLAG / nvidia_speech_api_key (the same key as the Hindi voice). Only the audio of
-what you say to PLAG is sent, never the always-on wake listening.
+Key: Windows Credential Manager, PLAG / nvidia_hearing_api_key (hearing's own key, 2026-09-28), else
+nvidia_speech_api_key (the same key as the Hindi voice). Only the audio of what you say to PLAG is sent, never the
+always-on wake listening.
 """
 
 import asyncio
@@ -24,6 +25,10 @@ SERVER = "grpc.nvcf.nvidia.com:443"
 FUNCTION_ID = "71203149-d3b7-4460-8231-1be2543a1fca"  # ai-parakeet-1_1b-rnnt-multilingual-asr on NVCF
 LANGUAGE = "multi"
 NAME = "NVIDIA Parakeet"
+
+
+def _key() -> str | None:
+    return get_secret("nvidia_hearing_api_key") or get_secret("nvidia_speech_api_key")
 
 
 class Session:
@@ -102,7 +107,7 @@ class NvHearing:
 
     @staticmethod
     def configured() -> bool:
-        return bool(get_secret("nvidia_speech_api_key"))
+        return bool(_key())
 
     def usable(self) -> bool:
         return self.configured() and time.time() >= self._rest_until
@@ -118,7 +123,7 @@ class NvHearing:
         with self._lock:
             if self._service is None:
                 auth = riva.client.Auth(uri=SERVER, use_ssl=True, metadata_args=[
-                    ["function-id", FUNCTION_ID], ["authorization", f"Bearer {get_secret('nvidia_speech_api_key')}"]])
+                    ["function-id", FUNCTION_ID], ["authorization", f"Bearer {_key()}"]])
                 self._service = riva.client.ASRService(auth)
             return self._service
 

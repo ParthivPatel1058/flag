@@ -34,9 +34,7 @@ def _clean(text: str, limit: int) -> str:
 async def safe(prompt: str, limit: int = 300, timeout: float = 8.0) -> str | None:
     """The same thing described without names (None if no AI answered in time, or it changed nothing)."""
     system, text = SYSTEM.format(limit=limit), f"Description: {prompt}"
-    gemma = [m for m in MODELS["turn"] if m.startswith("gemma")]
-    racers = [gemini.turn(system=system, schema=SCHEMA, history=[], text=text, models=[m for m in MODELS["turn"] if m not in gemma]),
-              gemini.turn(system=system, schema=SCHEMA, history=[], text=text, models=gemma)]
+    racers = [gemini.turn(system=system, schema=SCHEMA, history=[], text=text, models=MODELS["turn"])]
     racers += [nvidia.turn(system=system, history=[], text=text, schema=SCHEMA, model=m, max_tokens=300) for m in nvidia.models()]
     if groq.ready():
         racers.append(groq.turn(system=system, history=[], text=text, schema=SCHEMA))

@@ -17,6 +17,18 @@ core         plag-core: agent, tools, policy, audit log, local API (Python 3.12,
    python -c "import keyring,getpass; keyring.set_password('PLAG','gemini_api_key', getpass.getpass('Gemini key: '))"
    ```
 
+   NVIDIA keys, the same way (each prompt asks for one key; paste it and press Enter):
+
+   ```
+   python -c "import keyring,getpass; keyring.set_password('PLAG','nvidia_hearing_api_key', getpass.getpass('Hearing (Parakeet) key: '))"
+   python -c "import keyring,getpass; keyring.set_password('PLAG','nvidia_muse_api_key', getpass.getpass('Muse key: '))"
+   python -c "import keyring,getpass; keyring.set_password('PLAG','nvidia_glm_api_key', getpass.getpass('GLM 5.3 Flash key: '))"
+   ```
+
+   *Hearing* is NVIDIA Parakeet, which understands what you say in English, Hindi and Hinglish (it falls back to
+   `nvidia_speech_api_key`). *Muse* (Meta) and *GLM 5.3 Flash* replace Gemma: they race Gemini on every command,
+   answer, news brief and piece of writing, and the first good answer wins.
+
 2. Install both halves:
 
    ```
@@ -71,7 +83,9 @@ and *Quit PLAG*. While PLAG is talking, say “stop”, “ruko”, “bas” or
 “search Gmail for BhoomiX” is Gmail, never Google). A follow-up “search X” uses the app you were in. Every browser
 and app step is checked against the real window title (the results page, not just “a tab opened”); the Now panel
 shows the plan as a live checklist, and PLAG says “On it.” before slower plans. “Research …” gathers ~10 news
-sources, writes a cited brief and saves it to `Documents\PLAG\Reports`.
+sources plus Wikipedia's article for background, writes a cited brief and saves it to `Documents\PLAG\Reports`.
+“Who is …” / “look up …” reads the top Wikipedia articles (English, plus Hindi Wikipedia when you speak Hindi) together
+with the latest news.
 
 **No second “PLAG”:** after PLAG asks you something (“What should I send to Rahul?”, “Which city?”) the mic opens
 for your answer, and after a spoken answer it keeps listening ~5 s (never after opening or playing something). The

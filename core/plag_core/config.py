@@ -16,10 +16,9 @@ MODELS_DIR = Path(os.environ.get("PLAG_MODELS_DIR") or Path(__file__).resolve().
 # Model routes: first healthy model wins. IDs verified against the Gemini key on 2026-09-23.
 MODELS = {
     # one call: audio or text in -> transcript + language + action + reply (JSON)
-    # the free tier is often overloaded (503), so there are several fallbacks; Gemma is the last resort
-    # Gemma runs on separate capacity and kept answering (3-7 s) while every Gemini model returned 503
-    "turn": ["gemini-3.1-flash-lite", "gemma-4-26b-a4b-it", "gemini-flash-lite-latest", "gemini-3.7-flash",
-             "gemini-flash-latest"],
+    # the free tier is often overloaded (503), so there are several fallbacks. Gemma was the backup brain until
+    # 2026-09-28; Muse and GLM 5.3 Flash on NVIDIA (nvidia.py) now race Gemini instead.
+    "turn": ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.7-flash", "gemini-flash-latest"],
     # speech out (supports Hindi). Free tier: 10 requests/day per model, so the dashboard prefers local voices.
     "tts": ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"],
     # camera: "what is this?"

@@ -305,13 +305,14 @@ def sarvam_row() -> dict:
 def glm_row() -> dict:
     h = nvidia.health
     if not nvidia.ready():
-        state, detail = ("off", "No NVIDIA key saved") if not nvidia._keys() else ("degraded", "Both models resting after errors · back in 5 min")
+        state, detail = ("off", "No NVIDIA key saved") if not nvidia._keys() else ("degraded", "All models resting after errors · back in 5 min")
     elif h and h["ok"]:
         state, detail = "online", f"Last answer: {h['model'].split('/')[-1]} · {h['ms'] / 1000:.1f} s"
     elif h:
         state, detail = "degraded", f"{h['model'].split('/')[-1]}: {h['error']} · still racing"
     else:
-        state, detail = "ready", "gpt-oss-20b + mistral-nemotron race Gemini on every question"
+        names = {"z-ai/glm-5.3-flash": "GLM 5.3 Flash", "meta/muse-glimmer-30b": "Muse"}
+        state, detail = "ready", " + ".join(names.get(m, m.split("/")[-1]) for m in nvidia.models()) + " race Gemini on every question"
     return {"id": "nvidia", "name": "NVIDIA open models", "role": "Race Gemini", "state": state, "detail": detail}
 
 
