@@ -85,11 +85,22 @@ class Session:
         self.t0 = time.monotonic()
         self.step_n = 0
         self.pending: dict | None = None  # the action waiting for approval
+        self.paused_at = 0.0  # when the approval card went up, so a card nobody answers is cleaned away
         self.screen: Screen | None = None
         self.step = None  # the dashboard's step function for this turn
 
 
 _paused: dict[str, Session] = {}
+PAUSED_S = 300  # a card you never answered: the job is dropped, so its screen and COM objects go too
+
+
+def _sweep() -> None:
+    """Forget jobs whose approval card went unanswered (they hold a live reading of a window)."""
+    now = time.monotonic()
+    for sid in [k for k, s in _paused.items() if now - s.paused_at > PAUSED_S]:
+        s = _paused.pop(sid, None)
+        if s is not None:
+            s.screen = None
 
 
 def _allowed_apps() -> set[str]:
@@ -187,6 +198,7 @@ async def start(goal: str, lang: str, task_id: str, step, app_hint: str = "") ->
 
 async def resume(session_id: str, approve: bool) -> dict:
     """Your answer to the approval card: do the risky action and carry on, or stop here."""
+    _sweep()
     s = _paused.pop(session_id, None)
     if s is None or s.pending is None:
         return {"error": "That request expired, sir. Say it again.", "code": "expired"}
@@ -267,6 +279,8 @@ async def _loop(s: Session) -> dict:
             did = await _act(s, obj)
         except NeedsYes as e:
             s.pending = {**obj, "_label": e.label}  # the screen is read again before it runs: match by name, not number
+            s.paused_at = time.monotonic()
+            _sweep()
             _paused[s.id] = s
             if s.step:
                 s.step(f"cw{s.step_n}", "waiting", "waiting for your OK", None, label)

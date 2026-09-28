@@ -133,7 +133,7 @@ async def generate(prompt: str) -> dict:
                 for finished in asyncio.as_completed(tasks):
                     try:
                         r = await finished
-                    except httpx.HTTPError:
+                    except Exception:  # one attempt failing must not cancel the other
                         continue
                     if r.status_code == 200:
                         break

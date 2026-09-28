@@ -43,7 +43,9 @@ async def safe(prompt: str, limit: int = 300, timeout: float = 8.0) -> str | Non
         for finished in asyncio.as_completed(tasks, timeout=timeout):
             try:
                 _model, obj, _ms = await finished
-            except ProviderError:
+            except Exception:  # one brain failing must not cancel the rest
+                continue
+            if not isinstance(obj, dict):
                 continue
             better = _clean(str(obj.get("prompt") or ""), limit)
             if better and better.casefold() != prompt.casefold() and not re.search(r"[^\x00-\x7f]", better):

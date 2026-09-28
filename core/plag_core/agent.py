@@ -981,8 +981,27 @@ class Agent:
         """Ask the AI brains. For text, Gemini and the NVIDIA models (GLM 5.3 Flash, Muse, gpt-oss, mistral-nemotron)
         race: the first good answer wins, the rest are cancelled."""
         system, history = system_prompt(lang_pref, self.context()), list(self.history)
-        if audio is not None:  # raw audio (Whisper heard nothing usable): only Gemini can listen
-            return await gemini.turn(system=system, schema=SCHEMA, history=history, audio_wav=audio)
+        if audio is not None:
+            # Gemini is the only brain that listens to audio directly. If it can't, the command isn't lost: another
+            # hearing turns it into words and every brain gets a go at those (before this, one Gemini failure here
+            # ended the whole spoken turn).
+            try:
+                return await gemini.turn(system=system, schema=SCHEMA, history=history, audio_wav=audio)
+            except Exception as first:
+                said = ""
+                if groq.ready():
+                    try:
+                        said = await groq.transcribe(audio, lang_pref if lang_pref in ("en", "hi") else None)
+                    except Exception:
+                        said = ""
+                if not said and nvhearing.usable():
+                    try:
+                        said = await asyncio.to_thread(nvhearing.recognize, audio)
+                    except Exception:
+                        said = ""
+                if not said:
+                    raise first
+                text = said
         racers = [gemini.turn(system=system, schema=SCHEMA, history=history, text=text, models=MODELS["turn"])]
         for m in nvidia.models():  # each NVIDIA model is its own racer
             racers.append(nvidia.turn(system=system, history=history, text=text or "", model=m))
@@ -1001,8 +1020,11 @@ class Agent:
                 for t in done:
                     try:
                         answer = t.result()
-                    except ProviderError as e:
+                    except Exception as e:  # any brain may fail any way: the others must still be heard
                         errors.append(e)
+                        continue
+                    if not isinstance(answer, tuple) or len(answer) != 3 or not isinstance(answer[1], dict):
+                        errors.append(ProviderError("a brain answered with something unreadable", "bad_output"))
                         continue
                     if not _suspect(answer[1]):
                         return answer

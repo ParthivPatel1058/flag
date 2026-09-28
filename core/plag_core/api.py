@@ -258,8 +258,12 @@ async def lifespan(_: FastAPI):
     for t in tasks:
         t.cancel()
     await gemini.close()
-    await google._http.aclose()
-    await eleven._http.aclose()
+    # every service that keeps connections open gets closed, so quitting never leaves sockets behind
+    for owner in (google, eleven, groq, nvidia, tinyfish, calcom, fishaudio, sarvam, websearch, edgevoice):
+        client = getattr(owner, "_http", None)
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.aclose()
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -910,6 +914,9 @@ async def _cached(name: str, seconds: float, make):
         return hit[1]
     out = await make()
     if not out.get("error"):  # a failed lookup is tried again next time, never cached for minutes
+        if len(_panel) > 24:  # one entry per topic asked for: drop the oldest rather than grow for ever
+            for old in sorted(_panel, key=lambda k: _panel[k][0])[:12]:
+                _panel.pop(old, None)
         _panel[name] = (time.time(), out)
     return out
 
