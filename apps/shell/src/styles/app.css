@@ -224,6 +224,18 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .orb-wrap { position: relative; width: min(43vh, 440px, 92%); aspect-ratio: 1; margin: 4px 0 0; flex-shrink: 0; }
 .orb-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* premium sphere: a soft aura behind the dots and a glass highlight in front, so it reads as a lit ball, not a flat cloud */
+.orb-wrap::before {
+  content: ''; position: absolute; inset: -14%; border-radius: 50%; pointer-events: none; z-index: 0;
+  background: radial-gradient(circle at 50% 44%, var(--glow, rgba(214, 242, 75, 0.2)) 0%, transparent 62%);
+  filter: blur(18px); opacity: 1; transition: background 0.6s ease;
+}
+.orb-wrap::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none; z-index: 2;
+  background: radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.10) 0%, transparent 38%);
+  mix-blend-mode: screen; opacity: 0.7;
+}
+.orb-canvas { z-index: 1; }
 /* no blur filter: the gradient is already soft, and a blurred layer under an animated canvas costs every frame */
 .orb-glow {
   position: absolute; inset: 6%; border-radius: 50%;
@@ -489,8 +501,8 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radi
 /* conversation / memory / reminders tabs */
 .panel-h.tabs { justify-content: flex-start; gap: 2px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
 .panel-h.tabs button {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ash-2);
-  padding: 3px 7px; border-radius: 6px; white-space: nowrap;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ash-2);
+  padding: 3px 6px; border-radius: 6px; white-space: nowrap; flex: 0 1 auto; min-width: 0;
 }
 .panel-h.tabs button.on { color: var(--bone); background: rgba(238, 239, 232, 0.07); }
 .panel-h.tabs button:focus-visible { outline: 1px solid var(--lime); outline-offset: 1px; }

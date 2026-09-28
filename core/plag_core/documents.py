@@ -18,8 +18,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import drafts
-from .gemini import ProviderError, gemini
-from .nvidia import GLM, MUSE, nvidia
+from .gemini import ProviderError
+from . import brains
 from .research import _documents
 
 WRITING = _documents() / "PLAG" / "Writing"
@@ -145,7 +145,6 @@ WRITE_SCHEMA = {"type": "OBJECT", "properties": {"title": {"type": "STRING"}, "s
                                                  "markdown": {"type": "STRING"}}, "required": ["title", "summary", "markdown"]}
 # the strongest models first: this is where writing quality matters more than a second of speed
 WRITE_MODELS = ["gemini-flash-latest", "gemini-3.7-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"]
-NVIDIA_WRITERS = (GLM, MUSE)  # replaced Gemma as the writers racing Gemini (2026-09-28)
 
 
 async def write(kind: str, topic: str, lang: str = "en", length: str = "") -> dict:
@@ -161,24 +160,12 @@ async def write(kind: str, topic: str, lang: str = "en", length: str = "") -> di
               f"no title line, no links, no images, no tables).")
     t0 = asyncio.get_running_loop().time()
     ask = f"Write: {kind} about {topic}"
-    racers = [asyncio.create_task(gemini.turn(system=system, schema=WRITE_SCHEMA, history=[], text=ask,
-                                              models=WRITE_MODELS, route="write"))]
-    racers += [asyncio.create_task(nvidia.turn(system=system, history=[], text=ask, schema=WRITE_SCHEMA, model=m,
-                                               max_tokens=4000, timeout=75.0))
-               for m in nvidia.models() if m in NVIDIA_WRITERS]
-    obj, model = None, ""
-    try:
-        for finished in asyncio.as_completed(racers):
-            try:
-                model, got, _ = await finished
-            except ProviderError:
-                continue
-            if len((got.get("markdown") or "").split()) >= 40:
-                obj = got
-                break
-    finally:
-        for t in racers:
-            t.cancel()
+    try:  # the brain team, thinking first: Gemini's strongest writers race GLM and Muse reasoning it through
+        model, obj = await brains.race(system, WRITE_SCHEMA, ask, deep=True, timeout=60.0, grace=15.0, max_tokens=4000,
+                                       route="write", gemini_models=WRITE_MODELS,
+                                       accept=lambda o: len((o.get("markdown") or "").split()) >= 40)
+    except ProviderError:
+        obj, model = None, ""
     if not obj:
         raise DocError("The AI is busy right now, so I couldn't write it. Try again in a minute.", "ai_busy")
     title = (obj.get("title") or f"{kind.title()}: {topic}").strip()[:140]

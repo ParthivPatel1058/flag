@@ -853,6 +853,8 @@ export interface Settings {
   inbox_draft: boolean; // draft a reply for each (never sent)
   inbox_announce: boolean; // say new messages out loud
   inbox_owner: string; // your name, for drafts written as you
+  computer_use: boolean; // PLAG may click and type in your apps
+  computer_apps: string; // the apps it may drive (comma-separated); empty = any but the blocked ones
 }
 
 export type VoiceEngine = 'auto' | 'fish' | 'sarvam' | 'nvidia' | 'edge' | 'elevenlabs' | 'local';

@@ -350,3 +350,19 @@ async def cal_reschedule(uid: str, start: str, label: str, reason: str = "") -> 
         return ToolResult(False, str(e), state="failed")
     return ToolResult(True, f"Moved {label} to {say_time(b['start'])}. Cal.com has let them know.", {"uid": b["uid"]},
                       state="rescheduled")
+
+
+# ---------------------------------------------------------------- computer use: the one risky step you approved
+
+@tool(ToolSpec("computer_continue", Level.EXTERNAL, "Press the button you approved, and carry on with the job",
+               timeout_s=180))
+async def computer_continue(session: str, label: str) -> ToolResult:
+    from . import deskagent
+
+    out = await deskagent.resume(session, True)
+    if out.get("error"):
+        return ToolResult(False, out["error"], state="failed")
+    if out.get("needs_yes"):  # another risky button further along
+        y = out["needs_yes"]
+        return ToolResult(True, f"{y['summary']} (say “yes” again to go ahead)", {"needs_yes": y}, state="user_required")
+    return ToolResult(bool(out.get("ok", True)), out.get("reply", f"Pressed {label}."), state="done")

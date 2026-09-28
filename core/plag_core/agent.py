@@ -21,7 +21,7 @@ from . import memory as mem
 from .google import GoogleError, google
 from pathlib import Path
 
-from . import autopilot, calcom as cal, documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
+from . import autopilot, calcom as cal, deskagent, documents, drafts, files, imagegen, inbox, knowledge, location, model3d, navigation, promptfix, research, weather, whatsapp
 from . import settings as app_settings
 from .elevenlabs import ElevenError, eleven
 from .imagegen import ImageError
@@ -52,6 +52,7 @@ CREATIVE_ACTIONS = ["generate_3d", "weather", "weather_sim", "where", "write",  
                     "inbox_check", "inbox_reply",  # new messages on your connected accounts, and drafting a reply
                     "cal_bookings", "cal_slots", "cal_link", "cal_book", "cal_cancel", "cal_reschedule",  # Cal.com
                     "web_task",  # TinyFish's web agent: done on a real website, in its cloud browser
+                    "computer_task",  # PLAG clicking and typing in your own apps to finish a job
                     "agent_task"]  # autopilot: a goal PLAG works through on its own, step by step
 ACTIONS = ["none", "open_url", "open_app", "web_search", "play_youtube", "system_status", "whatsapp_send",
            "whatsapp_call", "whatsapp_open", "gmail_search", "research", "camera_look", "screen_look", "ui", *MEMORY_ACTIONS,
@@ -257,6 +258,13 @@ Return JSON for every user turn:
     action.text exactly what to find, in English. It only reads and reports: never buys, books, signs in or posts.
     Takes 20-60 seconds, so use it only when a plain lookup can't answer (live prices, listings, timetables).
     Leave reply empty.
+  - "computer_task": a job in an app ON THIS LAPTOP that needs clicking and typing, which PLAG does itself: "in
+    Word, change the phone number in my resume to X", "total column C in Excel", "rename these files in the folder",
+    "fill this form with my details", "close the tabs I'm not using". action.text is the job in the user's words
+    (complete, in English); action.app is the app to use if they named one (from the app list above), else leave it
+    out. PLAG works in the window step by step and asks before anything risky. Use it only when the job really needs
+    the app's own screen: opening a file, a site, an app or a search has its own action, and web_task is for reading
+    a website. Leave reply empty.
   - "where": where the user is right now, their current location or address ("where am I", "mera address kya hai").
     PLAG reads it from Windows Location. action.text is "address" when they ask for the address. Leave reply empty.
   - "remember": the user asks you to remember something about them. action.text is the fact, written as a short
@@ -530,6 +538,9 @@ def _intent_from_action(a: dict, lang: str, reply: str) -> Intent:
     elif kind in ("cal_cancel", "cal_reschedule") and (a.get("contact") or a.get("query") or "").strip():
         return Intent(kind, {"who": (a.get("contact") or a.get("query")).strip(), "when": (a.get("when") or "").strip(),
                              "reason": (a.get("text") or "").strip()}, lang, "", "Cal.com")
+    elif kind == "computer_task" and (a.get("text") or a.get("query") or "").strip():
+        return Intent("computer_task", {"goal": (a.get("text") or a.get("query")).strip(),
+                                        "app": a["app"] if a.get("app") in APPS else ""}, lang, "", "Computer")
     elif kind == "web_task" and (a.get("text") or a.get("query") or "").strip():
         url = (a.get("url") or "").strip()
         return Intent("web_task", {"url": url if url.startswith("https://") else "https://www.google.com/search?q="
@@ -678,7 +689,8 @@ def _action_label(intent: Intent) -> str:
             "cal_bookings": "Cal.com: your meetings", "cal_slots": "Cal.com: free slots", "cal_link": "Cal.com: booking link",
             "cal_book": f"Cal.com: book with {args.get('name', '')}", "cal_cancel": f"Cal.com: cancel {args.get('who', '')}",
             "cal_reschedule": f"Cal.com: move {args.get('who', '')}",
-            "web_task": f"Web agent: {args.get('goal', '')[:60]}"}.get(a, "Act")
+            "web_task": f"Web agent: {args.get('goal', '')[:60]}",
+            "computer_task": f"On this laptop: {args.get('goal', '')[:55]}"}.get(a, "Act")
 
 
 def _in_step(step, index: int, label: str):
@@ -689,7 +701,7 @@ def _in_step(step, index: int, label: str):
 
 
 # Plans worth an instant "On it." before the result: anything that takes more than a moment.
-_SLOW = {"agent_task", "web_task", "cal_bookings", "cal_slots", "web_search", "play_youtube", "whatsapp_send", "whatsapp_call", "whatsapp_open", "gmail_check", "gmail_search",
+_SLOW = {"agent_task", "web_task", "computer_task", "cal_bookings", "cal_slots", "web_search", "play_youtube", "whatsapp_send", "whatsapp_call", "whatsapp_open", "gmail_check", "gmail_search",
          "calendar_check", "generate_image", "research", "system_status", "weather", "weather_sim", "where",
          "write", "lookup"}
 CONTEXT_S = 600  # how long "the app you're in" carries over to your next command
@@ -830,7 +842,7 @@ class Agent:
                 how = f"{heard_by} · fast path" if heard_by else "Fast path, no cloud call"
                 model = heard_by.lower() if heard_by else model
                 step("understand", "done", how + (f" · {n} actions" if n > 1 else ""), int((time.perf_counter() - t1) * 1000))
-        if audio and not intents and (wake_mod.available() or nvhearing.usable()):
+        if audio and not intents and (wake_mod.available() or nvhearing.usable() or groq.ready()):
             # NVIDIA Parakeet first when it's set up (~0.3-0.5 s, hears Hinglish and names; the on-device model then
             # never loads, ~150 MB saved), else on-device Whisper. Only this command's audio is sent.
             heard, heard_by = hint or "", "On-device Whisper"
@@ -839,6 +851,12 @@ class Agent:
                 try:
                     heard, heard_by = await asyncio.to_thread(nvhearing.recognize, audio), NV_HEARING
                 except Exception:
+                    heard = ""
+            if not heard and groq.ready():  # Whisper Large V3 on Groq: the most accurate hearing, ~0.5 s
+                step("understand", "running", "Whisper Large V3 on Groq · hearing you")
+                try:
+                    heard, heard_by = await groq.transcribe(audio, lang_pref if lang_pref in ("en", "hi") else None), "Groq Whisper"
+                except ProviderError:
                     heard = ""
             if not heard and wake_mod.available():
                 try:
@@ -849,7 +867,7 @@ class Agent:
             said = rest if woke else heard
             # the wake listener's quick model misheard names (2026-09-26: "Chachu Bangalore High"): whatever it caught
             # is always heard again by NVIDIA when NVIDIA is set up, however short
-            if said and heard_by != NV_HEARING and (hint and nvhearing.usable() or not self._simple(said)):
+            if said and heard_by not in (NV_HEARING, "Groq Whisper") and (hint and (nvhearing.usable() or groq.ready()) or not self._simple(said)):
                 # a longer command or names: hear it again, better (only this command's audio is sent, never the
                 # always-on listening): NVIDIA Parakeet, else ElevenLabs Scribe, else the more accurate on-device
                 # model when the fast listening one caught it ("PLAG, open…" in one breath)
@@ -860,6 +878,13 @@ class Agent:
                         better = await asyncio.to_thread(nvhearing.recognize, audio)
                         heard_by = NV_HEARING
                     except Exception:
+                        better = ""
+                if not better and groq.ready() and heard_by != "Groq Whisper":
+                    step("understand", "running", "Whisper Large V3 on Groq · hearing you again")
+                    try:
+                        better = await groq.transcribe(audio, lang_pref if lang_pref in ("en", "hi") else None)
+                        heard_by = "Groq Whisper"
+                    except ProviderError:
                         better = ""
                 if not better and self._can_hear_better():
                     step("understand", "running", "ElevenLabs · hearing you")
@@ -1139,6 +1164,8 @@ class Agent:
             return await self._save_place(intent.args["label"], intent.args.get("place", ""), lang, task_id, step, out)
         if intent.action.startswith("cal_"):
             return await self._cal(intent, lang, task_id, step, out)
+        if intent.action == "computer_task":
+            return await self._computer(intent.args["goal"], intent.args.get("app", ""), lang, task_id, step, out)
         if intent.action == "web_task":
             return await self._web_task(intent.args["url"], intent.args["goal"], lang, task_id, step, out)
         if intent.action == "agent_task":
@@ -1667,6 +1694,38 @@ class Agent:
         out["mood"] = "calm"
         return out
 
+    async def _computer(self, goal: str, app: str, lang: str, task_id: str, step, out: dict) -> dict:
+        """PLAG works in your app itself: look, do one thing, look again. A risky button waits for your "yes"."""
+        bus.publish("status.changed", {"state": "executing"}, task_id)
+        out["action"] = {**out.get("action", {}), "type": "computer_task", "label": "Computer", "goal": goal[:200]}
+        if DRY_RUN:
+            out.update(result={"ok": True, "detail": "dry run: nothing touched"},
+                       reply=_say(lang, "Done, sir.", "", "Ho gaya, sir."))
+            return out
+        step("act", "running", "Looking at your screen")
+        res = await deskagent.start(goal, lang, task_id, step, app)
+        if res.get("error"):
+            step("act", "failed", res.get("code", "failed"))
+            out.update(result={"ok": False, "detail": res.get("code", "failed")}, reply=res["error"], mood="sorry")
+            return out
+        if y := res.get("needs_yes"):
+            pending = approvals.create("computer_continue", {"session": y["session"], "label": y["label"]},
+                                       {"name": "On this laptop", "message": y["summary"]}, lang)
+            out["approval"] = {"id": pending.id, "kind": "computer", "name": f"In {y['where']}", "phone_tail": "",
+                               "message": y["summary"], "expires_in": approvals.TTL_SECONDS}
+            out["result"] = {"ok": True, "detail": "waiting for your OK", "state": "user_required"}
+            out["reply"] = _say(lang, f"{y['summary']}", "", f"{y['summary']}")
+            out["mood"] = "curious"
+            out["expects_reply"] = True
+            return out
+        done = len(res.get("steps") or [])
+        step("act", "done" if res.get("ok") else "warn", f"{done} steps in your apps")
+        out["result"] = {"ok": bool(res.get("ok")), "detail": f"{done} steps"}
+        out["reply"] = res.get("reply") or _say(lang, "Done, sir.", "", "Ho gaya, sir.")
+        out["history_reply"] = f"(worked in your apps: {goal[:90]}) {out['reply'][:200]}"
+        out["mood"] = "calm" if res.get("ok") else "sorry"
+        return out
+
     async def _web_task(self, url: str, goal: str, lang: str, task_id: str, step, out: dict) -> dict:
         """TinyFish's web agent does it on the real website (its cloud browser, never your accounts) and reports back."""
         bus.publish("status.changed", {"state": "executing"}, task_id)
@@ -2059,6 +2118,8 @@ class Agent:
                      "approval_done": approval_id}
         if pending is not None and pending.tool.startswith("cal_"):
             out["action"]["label"] = "Cal.com"
+        elif pending is not None and pending.tool.startswith("computer_"):
+            out["action"]["label"] = "Computer"
         if pending is None:
             out["reply"] = _say(lang, "That request expired. Say it again, sir.", "वह रिक्वेस्ट खत्म हो गई। फिर से बोलिए।",
                                 "Woh request expire ho gayi. Phir se boliye.")
@@ -2078,7 +2139,7 @@ class Agent:
         out["result"] = {"ok": result.ok, "detail": result.detail}
         name = pending.summary.get("name", "")
         mode = result.data.get("mode")
-        if pending.tool.startswith("cal_"):  # Cal.com: the tool says exactly what happened
+        if pending.tool.startswith(("cal_", "computer_")):  # the tool says exactly what happened
             out["reply"] = result.detail if result.ok else _say(lang, f"That didn't go through: {result.detail}", "",
                                                                 f"Nahi ho paaya: {result.detail}")
             out["mood"] = "cheerful" if result.ok else "sorry"

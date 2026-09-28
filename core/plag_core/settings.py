@@ -38,6 +38,9 @@ DEFAULTS = {
     "inbox_agent": True,                     # watch connected accounts and Gmail for new messages
     "inbox_draft": True,                     # draft a reply for each (the message goes to the AI to write it)
     "inbox_announce": True,                  # say new messages out loud (always shown in the Inbox tab)
+    # Computer use (deskagent.py): PLAG clicking and typing in your apps to finish a job you asked for
+    "computer_use": False,                   # off until you turn it on
+    "computer_apps": "",                     # apps it may drive, comma-separated ("notepad.exe, winword.exe"); empty = any app but the blocked ones
     "inbox_owner": "",                       # your name, so drafts are signed and written as you
     "v": 2,                                  # settings version, for moving old defaults forward once
 }
@@ -94,6 +97,8 @@ def update(changes: dict) -> dict:
             value = value.strip()
             if not re.fullmatch(r"[A-Za-z0-9_-]{0,64}", value):
                 continue  # a voice id is letters and digits (from the voice page's address)
+        if key == "computer_apps":
+            value = ", ".join(sorted({a.strip().lower()[:40] for a in value.split(",") if a.strip()}))[:400]
         if key in ("home_city", "inbox_owner"):
             value = " ".join(value.split())[:60]
         current[key] = value

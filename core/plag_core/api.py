@@ -34,6 +34,7 @@ from .audit import audit
 from .bus import bus
 from .config import MODELS, TTS_CACHE_DIR, VOICE
 from .gemini import ProviderError, gemini
+from .groq import groq
 from .nvidia import nvidia
 from .edgevoice import EdgeError, edgevoice
 from .nvasr import NAME as NV_HEARING, nvhearing
@@ -180,6 +181,8 @@ async def _nvidia_stream(text: str, mood: str) -> Response | None:
 
 
 IDLE_S = 600  # a model nobody used for 10 minutes gives its memory back
+# when a cloud hearing does the work (NVIDIA Parakeet or Groq Whisper), the bigger local model is freed much sooner
+IDLE_S_HEARD_IN_CLOUD = 120
 
 
 async def _idle_loop() -> None:
@@ -187,7 +190,8 @@ async def _idle_loop() -> None:
     while True:
         await asyncio.sleep(60)
         try:
-            freed = await asyncio.to_thread(wake_mod.unload_idle, IDLE_S)
+            cloud_ears = nvhearing.usable() or groq.ready()
+            freed = await asyncio.to_thread(wake_mod.unload_idle, IDLE_S_HEARD_IN_CLOUD if cloud_ears else IDLE_S)
             if _eleven_speaks() and await asyncio.to_thread(local_voice.unload_idle, IDLE_S):
                 freed.append("kokoro")
             if freed:
@@ -336,6 +340,20 @@ def glm_row() -> dict:
     return {"id": "nvidia", "name": "NVIDIA open models", "role": "Race Gemini", "state": state, "detail": detail}
 
 
+def groq_row() -> dict:
+    from .groq import groq
+    h = groq.health
+    if not groq.key():
+        state, detail = "off", "No key · Settings → Keys → Groq: the fastest answers, and Whisper hearing (free)"
+    elif not groq.ready():
+        state, detail = "degraded", "Resting after errors · other brains still answer"
+    elif h and h.get("ok"):
+        state, detail = "online", f"Llama 3.3 70B + Whisper Large V3 · {h['ms'] / 1000:.1f} s"
+    else:
+        state, detail = "ready", "Fastest answers + best hearing (Whisper Large V3)"
+    return {"id": "groq", "name": "Groq", "role": "Fast brain and hearing", "state": state, "detail": detail}
+
+
 def eleven_row() -> dict:
     u = eleven._usage
     if not eleven.configured():
@@ -450,6 +468,17 @@ def tinyfish_row() -> dict:
     return {"id": "tinyfish", "name": "TinyFish", "role": "Web search and web agent", "state": state, "detail": detail}
 
 
+def computer_row() -> dict:
+    st = app_settings.get()
+    if not st.get("computer_use"):
+        state, detail = "off", "Off · Settings → Computer use lets PLAG click and type in your apps"
+    else:
+        apps = st.get("computer_apps") or ""
+        where = apps if apps else "any app except terminals, Settings and password windows"
+        state, detail = "ready", f"On · {where[:70]} · asks before anything risky"
+    return {"id": "computer", "name": "Computer use", "role": "Works in your apps", "state": state, "detail": detail}
+
+
 def calcom_row() -> dict:
     if not calcom.configured():
         state, detail = "off", "No key · Settings → Keys → Cal.com: meetings, free slots, booking by voice"
@@ -513,6 +542,7 @@ def connectors() -> list[dict]:
         sarvam_row(),
         eleven_row(),
         glm_row(),
+        groq_row(),
         image_row(),
         model3d_row(),
         weather_row(),
@@ -521,6 +551,7 @@ def connectors() -> list[dict]:
         inbox_row(),
         calcom_row(),
         tinyfish_row(),
+        computer_row(),
         websearch_row(),
     ]
 

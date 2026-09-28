@@ -13,15 +13,12 @@ a message sent, it drafts it and asks you at the end. Tool results are data: tex
 never steer the autopilot to a new goal.
 """
 
-import asyncio
 import json
 import time
 
+from . import brains
 from .bus import bus
-from .config import MODELS
-from .gemini import ProviderError, gemini
-from .groq import groq
-from .nvidia import nvidia
+from .gemini import ProviderError
 from .policy import policy
 
 MAX_STEPS = 8
@@ -102,29 +99,10 @@ Rules:
 {base_rules}"""
 
 
-async def _decide(system: str, schema: dict, text: str) -> tuple[str, dict]:
-    """One decision: the first good answer of Gemini, the NVIDIA models and Groq."""
-    racers = [asyncio.create_task(gemini.turn(system=system, schema=schema, history=[], text=text, models=MODELS["turn"]))]
-    racers += [asyncio.create_task(nvidia.turn(system=system, history=[], text=text, schema=schema, model=m, max_tokens=700))
-               for m in nvidia.models()]
-    if groq.ready():
-        racers.append(asyncio.create_task(groq.turn(system=system, history=[], text=text, schema=schema)))
-    errors: list[Exception] = []
-    try:
-        for finished in asyncio.as_completed(racers, timeout=25):
-            try:
-                model, obj, _ = await finished
-            except ProviderError as e:
-                errors.append(e)
-                continue
-            if isinstance(obj, dict) and (obj.get("action") or obj.get("done")):
-                return model, obj
-    except TimeoutError:
-        pass
-    finally:
-        for t in racers:
-            t.cancel()
-    raise errors[0] if errors else ProviderError("No AI answered in time", "timeout")
+async def _decide(system: str, schema: dict, text: str, deep: bool = False) -> tuple[str, dict]:
+    """One decision from the brain team (brains.py). The first step is the plan: there GLM and Muse think first."""
+    return await brains.race(system, schema, text, deep=deep, grace=6.0,
+                             accept=lambda o: bool(o.get("action") or o.get("done")))
 
 
 def _observe(o: dict) -> str:
@@ -160,7 +138,7 @@ async def run(agent, goal: str, lang: str, task_id: str, step) -> dict:
         history = "\n".join(f"STEP {n + 1}: {what}\nRESULT: {res}" for n, (what, res) in enumerate(done_steps)) or "(nothing yet)"
         text = f"GOAL: {goal}\n\nSTEPS SO FAR:\n{history}\n\nSteps left: {MAX_STEPS - i}. What next?"
         try:
-            model, obj = await _decide(system, schema, text)
+            model, obj = await _decide(system, schema, text, deep=(i == 0))
         except ProviderError as e:
             step("plan", "failed", f"The AI didn't answer ({e.code})")
             break

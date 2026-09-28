@@ -462,6 +462,35 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
           </section>
         ) : null}
 
+        {settings ? (
+          <section className="set-sec">
+            <h3>Computer use</h3>
+            <p className="set-note">
+              PLAG can finish a job in your own apps by clicking and typing, reading each window through Windows'
+              accessibility interface. It stops the moment you move the mouse, switch windows or press Esc, and it asks
+              before anything risky (delete, send, pay, uninstall). It never types into a password box, and never drives
+              terminals, the registry editor, Windows Settings or sign-in windows.
+            </p>
+            <label className="set-row">
+              <span>Let PLAG click and type in my apps</span>
+              <input type="checkbox" checked={settings.computer_use}
+                onChange={(e) => void change({ computer_use: e.target.checked })} />
+            </label>
+            {settings.computer_use ? (
+              <form className="set-row" onSubmit={(e) => {
+                e.preventDefault();
+                const v = (new FormData(e.currentTarget).get('apps') as string) ?? '';
+                void change({ computer_apps: v.trim() });
+              }}>
+                <span>Only these apps (leave empty for any app it's allowed to touch)</span>
+                <input className="city" name="apps" key={settings.computer_apps} defaultValue={settings.computer_apps}
+                  placeholder="notepad.exe, winword.exe, excel.exe" aria-label="Allowed apps" autoComplete="off" spellCheck={false}
+                  onBlur={(e) => e.target.value.trim() !== settings.computer_apps && void change({ computer_apps: e.target.value.trim() })} />
+              </form>
+            ) : null}
+          </section>
+        ) : null}
+
         <KeysSection />
 
         <section className="set-sec">

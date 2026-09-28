@@ -55,7 +55,7 @@ export interface Connector {
 }
 export interface Approval {
   id: string;
-  kind: 'whatsapp' | 'calendar';
+  kind: 'whatsapp' | 'calendar' | 'computer';
   name: string;
   phone_tail: string;
   message: string;

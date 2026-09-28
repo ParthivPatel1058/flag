@@ -24,9 +24,8 @@ from pathlib import Path
 
 import httpx
 
-from .config import MODELS
-from .gemini import ProviderError, gemini
-from .nvidia import nvidia
+from . import brains
+from .gemini import ProviderError
 from .tinyfish import tinyfish
 
 FEED = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -127,23 +126,11 @@ async def _brief(topic: str, items: list[dict], lang: str) -> dict:
     data = "\n".join(f"[{i}] {it['title']} ({it['source']}, {it['date']})" + (f": {it['extract']}" if it.get("extract") else "")
                      for i, it in enumerate(items, 1))
     text = f"TOPIC: {topic}\nSOURCES:\n{data}"
-    racers = [asyncio.create_task(gemini.turn(system=system, schema=BRIEF_SCHEMA, history=[], text=text,
-                                              models=MODELS["turn"], route="write"))]
-    racers += [asyncio.create_task(nvidia.turn(system=system, history=[], text=text, schema=BRIEF_SCHEMA, model=m,
-                                               max_tokens=1200, timeout=40.0)) for m in nvidia.models()]
-    obj = None
-    try:
-        for finished in asyncio.as_completed(racers):
-            try:
-                _, got, _ = await finished
-            except ProviderError:
-                continue
-            if got.get("overview") or got.get("spoken"):
-                obj = got
-                break
-    finally:
-        for t in racers:
-            t.cancel()
+    try:  # the brain team; GLM and Muse think it through (a brief is worth a few seconds more)
+        _model, obj = await brains.race(system, BRIEF_SCHEMA, text, deep=True, timeout=40.0, grace=10.0, max_tokens=1500,
+                                        route="write", accept=lambda o: bool(o.get("overview") or o.get("spoken")))
+    except ProviderError:
+        obj = None
     if obj is None:
         return _headlines_only(topic, items, lang)
     n = len(items)

@@ -106,17 +106,17 @@ function ApprovalCard() {
   return (
     <div className="approval" role="dialog" aria-label={a.kind === 'calendar' ? a.name : `Send WhatsApp message to ${a.name}`}>
       <div className="ap-head">
-        {a.kind === 'calendar' ? <CalendarIcon /> : <WhatsAppIcon />}
-        {a.kind === 'calendar' ? <span><b>{a.name}</b></span> : <span>WhatsApp to <b>{a.name}</b></span>}
+        {a.kind === 'calendar' ? <CalendarIcon /> : a.kind === 'computer' ? <KeyboardIcon /> : <WhatsAppIcon />}
+        {a.kind === 'whatsapp' ? <span>WhatsApp to <b>{a.name}</b></span> : <span><b>{a.name}</b></span>}
         {a.phone_tail ? <span className="ap-tail mono">••{a.phone_tail}</span> : null}
       </div>
       <p className="ap-msg">{a.message}</p>
       <div className="ap-actions">
         <button className="ap-cancel" onClick={() => void decideApproval(false)}>Cancel</button>
-        <button className="ap-send" onClick={() => void decideApproval(true)} autoFocus>{a.kind === 'calendar' ? 'Confirm' : 'Send'}</button>
+        <button className="ap-send" onClick={() => void decideApproval(true)} autoFocus>{a.kind === 'whatsapp' ? 'Send' : 'Confirm'}</button>
       </div>
       <div className="ap-timer" aria-hidden="true"><i style={{ transform: `scaleX(${left})` }} /></div>
-      <p className="ap-hint">{listening ? `Listening… say “yes” or “haan”, or “cancel”` : a.kind === 'calendar' ? 'Or say “PLAG, yes”' : 'Or say “PLAG, send it”'}</p>
+      <p className="ap-hint">{listening ? 'Listening… say “yes” or “haan”, or “cancel”' : a.kind === 'whatsapp' ? 'Or say “PLAG, send it”' : 'Or say “PLAG, yes”'}</p>
     </div>
   );
 }

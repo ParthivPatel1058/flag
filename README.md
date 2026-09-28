@@ -133,6 +133,18 @@ banao”) uses the camera: Gemini describes what you're showing and FLUX draws i
 (NVIDIA's hosted editing models only accept its own sample images). Every image is saved to `Pictures\PLAG` and shown
 on the dashboard with Open / Show in folder. Key: Credential Manager, `PLAG / nvidia_image_api_key`.
 
+**Computer use: PLAG working in your apps.** ⚙ Settings → *Computer use* (off until you turn it on). Then jobs that
+need an app's own screen are done by PLAG itself: “in Word, change the phone number in my resume to …”, “total column C
+in Excel”, “rename these files”, “fill this form with my details”. It reads each window through Windows' accessibility
+interface (the same one a screen reader uses), so it clicks the *real* “Save” button by name instead of guessing pixel
+positions, then looks again after every step. Each step shows live in the Now panel.
+
+It stops instantly when you move the mouse to another window, press Esc, or hit Halt. It **asks first** on an approval
+card before anything risky (delete, send, pay, uninstall, shut down, discard) and only acts on your “yes”. It **never**
+types into a password box, and **never** drives terminals, PowerShell, the registry editor, Windows Settings,
+Credential Manager, password managers, or any sign-in or payment window. Text on screen is data it reads, never
+instructions it follows. You can limit it to named apps (e.g. `notepad.exe, winword.exe, excel.exe`) in Settings.
+
 **Autopilot (agent mode):** give PLAG a goal and it works through it on its own, one step at a time: the AI picks a
 tool, PLAG runs it (same checks and audit log as any command), reads the result and decides the next step, up to 8
 steps. The Now panel shows each step live. “Brief me” / “plan my day” → weather, calendar, important mail, new

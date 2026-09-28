@@ -80,9 +80,12 @@ class Nvidia:
             self._rest_until[model], self._fails[model] = time.time() + 300, 0
 
     async def turn(self, *, system: str, history: list[tuple[str, str]], text: str, schema: dict | None = None,
-                   max_tokens: int = 700, model: str | None = None, timeout: float | None = None) -> tuple[str, dict, int]:
+                   max_tokens: int = 700, model: str | None = None, timeout: float | None = None,
+                   think: bool = False) -> tuple[str, dict, int]:
         """One JSON answer with the keys of `schema` (PLAG's command shape by default), from `model` or the first
-        one that isn't resting. `timeout` is for long answers (writing); racers keep the short default."""
+        one that isn't resting. `timeout` is for long answers (writing); racers keep the short default.
+        `think`: let the model reason before it answers (GLM and Muse think first, gpt-oss reasons more): slower,
+        better for plans, reports and hard questions."""
         model = model or next(iter(self.models()), None)
         keys = self._keys(model) if model else []
         if not keys or not model:
@@ -93,10 +96,14 @@ class Nvidia:
         messages.append({"role": "user", "content": text})
         body = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens, "stream": False}
         if model.startswith("openai/gpt-oss"):
-            body["reasoning_effort"] = "low"  # it reasons briefly first; "low" keeps that to a sentence or two
+            body["reasoning_effort"] = "medium" if think else "low"  # "low" keeps its reasoning to a sentence or two
         elif model in MODEL_KEYS:
-            body["chat_template_kwargs"] = _NO_THINKING
-            body["reasoning_effort"] = "low"
+            body["chat_template_kwargs"] = {"thinking": True, "enable_thinking": True} if think else _NO_THINKING
+            if not think:
+                body["reasoning_effort"] = "low"
+        if think:
+            body["max_tokens"] = max(max_tokens, 4000)  # the reasoning uses tokens before the answer starts
+            timeout = timeout or 60.0
         t0 = time.perf_counter()
         r = None
         for key in keys:
