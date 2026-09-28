@@ -327,7 +327,8 @@ async def worker() -> None:
 async def gmail_poller() -> None:
     """Every two minutes while Google is connected: unread inbox mail PLAG hasn't seen goes into the inbox."""
     from .google import GoogleError, google  # google imports settings; loaded lazily to keep startup light
-    seen: set[str] = set()
+    seen: list[str] = []  # the ids already handled, newest last: only the last few hundred are worth remembering
+    SEEN_MAX = 400
     first = True
     while True:
         await asyncio.sleep(20 if first else 120)
@@ -344,7 +345,9 @@ async def gmail_poller() -> None:
             key = m.get("id") or f"{m['from']}|{m['subject']}"
             if key in seen:
                 continue
-            seen.add(key)
+            seen.append(key)
+            if len(seen) > SEEN_MAX:
+                del seen[:len(seen) - SEEN_MAX]
             if first:
                 continue  # what was already unread when PLAG started isn't "new"
             if item := add(account="google", service_url="mail.google.com", title="", sender=m["from"], subject=m["subject"],

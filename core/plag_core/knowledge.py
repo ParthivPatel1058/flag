@@ -119,7 +119,9 @@ async def answer(question: str, topic: str, lang: str = "en") -> dict:
         for finished in asyncio.as_completed(racers, timeout=5):
             try:
                 model, obj, _ = await finished
-            except ProviderError:
+            except Exception:  # one brain failing must not cancel the rest
+                continue
+            if not isinstance(obj, dict):
                 continue
             spoken = (obj.get("answer") or "").strip()
             if spoken:
