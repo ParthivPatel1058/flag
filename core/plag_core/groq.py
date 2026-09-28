@@ -85,6 +85,21 @@ class Groq:
         return f"groq {MODEL}", obj, ms
 
 
+    async def check_key(self, key: str) -> None:
+        """Prove a key works before it's saved (one free call to the model list). Raises ProviderError."""
+        key = key.strip()
+        if not key.startswith("gsk_"):
+            raise ProviderError("A Groq key starts with gsk_ (console.groq.com → API keys).", "bad_key")
+        try:
+            r = await self._http.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {key}"})
+        except httpx.HTTPError as e:
+            raise ProviderError("Groq can't be reached right now. Check the internet and try again.", "offline") from e
+        if r.status_code in (401, 403):
+            raise ProviderError("Groq didn't accept that key. Copy it again from console.groq.com → API keys.", "bad_key")
+        if r.status_code != 200:
+            raise ProviderError(f"Groq answered with an error ({r.status_code}). Try again in a minute.", str(r.status_code))
+        self._fails, self._rest_until = 0, 0.0  # a fresh key starts with a clean slate
+
     async def transcribe(self, wav: bytes, language: str | None = None) -> str:
         """What was said in `wav`, by Whisper Large V3 on Groq (Hindi comes back as Hinglish in Latin letters).
         Raises ProviderError; the caller then tries the next hearing."""
