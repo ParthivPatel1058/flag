@@ -33,9 +33,11 @@ BLOCKED_APPS = {
     "1password.exe", "bitwarden.exe", "lastpass.exe", "dashlane.exe", "python.exe", "py.exe", "installer.exe",
 }
 # Window titles PLAG will not drive either (a password or security dialog can appear inside any app).
-BLOCKED_TITLES = re.compile(r"\b(?:sign in|log ?in|password|passcode|credential|authenticat|verify your identity|"
-                            r"two[- ]factor|security key|windows security|user account control|uac|net ?banking|"
-                            r"payment|card details|cvv|upi pin)\b", re.I)
+# The trailing \b means every alternative must end on a word boundary, so stems and plurals need spelling out:
+# "authenticat" alone could never match "Authentication", and "password" missed "Passwords".
+BLOCKED_TITLES = re.compile(r"\b(?:sign[- ]?in|log ?in|passwords?|passcodes?|credentials?|authenticat\w*|"
+                            r"verify your identity|two[- ]factor|security keys?|windows security|"
+                            r"user account control|uac|net ?banking|payments?|card details|cvv|upi pin)\b", re.I)
 # Buttons and menu items that need your "yes" before PLAG presses them.
 RISKY = re.compile(r"\b(?:delete|remove|uninstall|format|erase|wipe|discard|permanently|empty (?:the )?recycle|"
                    r"pay|buy|purchase|order|checkout|place order|subscribe|send|publish|post|tweet|share|"
@@ -263,10 +265,13 @@ def type_text(screen: Screen, text: str, into: int | None = None, clear: bool = 
     _guard()
     where = ""
     if into is not None:
-        el, item = screen.element(into)
+        _el, item = screen.element(into)
         if item["secret"]:
             raise Blocked("That's a password box. I never type into those: please type it yourself.", "password_box")
-        click(screen, into, approved=True)  # focusing a box is never the risky part
+        if item["kind"] not in ("box", "document", "dropdown"):
+            # clicking to focus skips the risky-button check, so it may only ever land on something you type into
+            raise ComputerError(f"“{item['name'] or item['kind']}” isn't a box I can type into.", "not_a_box")
+        click(screen, into, approved=True)  # focusing a text box is never the risky part
         time.sleep(0.15)
         where = f" into “{item['name'] or item['kind']}”"
     if clear:

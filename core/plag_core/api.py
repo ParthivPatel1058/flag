@@ -909,7 +909,8 @@ async def _cached(name: str, seconds: float, make):
     if hit and time.time() - hit[0] < seconds:
         return hit[1]
     out = await make()
-    _panel[name] = (time.time(), out)
+    if not out.get("error"):  # a failed lookup is tried again next time, never cached for minutes
+        _panel[name] = (time.time(), out)
     return out
 
 

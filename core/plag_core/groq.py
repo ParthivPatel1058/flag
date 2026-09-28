@@ -105,8 +105,14 @@ class Groq:
             self._failed(str(r.status_code), t0)
             raise ProviderError(f"Groq hearing HTTP {r.status_code}", r.status_code)
         from .hinglish import to_latin
+        try:
+            said = (r.json().get("text") or "").strip()
+        except ValueError as e:  # the caller can then try the next hearing
+            self._failed("bad_output", t0)
+            raise ProviderError("Groq hearing answer unreadable", "bad_output") from e
         self.health = {"ok": True, "ms": int((time.perf_counter() - t0) * 1000), "at": time.time(), "error": None}
-        return to_latin((r.json().get("text") or "").strip())
+        self._fails = 0  # hearing and answering share the counter: a success clears it, as turn() does
+        return to_latin(said)
 
 
 groq = Groq()

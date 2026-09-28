@@ -72,7 +72,11 @@ class FishAudio:
             raise FishError("Fish Audio didn't accept the key.", "bad_key")
         if r.status_code != 200:
             raise FishError(f"Fish Audio's voice search failed ({r.status_code}).", str(r.status_code))
-        items = [m for m in (r.json().get("items") or []) if m.get("_id") and m.get("state", "trained") == "trained"]
+        try:
+            found = r.json().get("items") or []
+        except ValueError as e:
+            raise FishError("Fish Audio's voice search sent something unreadable.", "bad_output") from e
+        items = [m for m in found if m.get("_id") and m.get("state", "trained") == "trained"]
         if not items:
             raise FishError(f"No “{query}” voice found on Fish Audio. Paste a voice ID in Settings.", "no_voice")
         english = [m for m in items if "en" in (m.get("languages") or [])] or items

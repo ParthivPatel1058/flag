@@ -198,6 +198,13 @@ async def resume(session_id: str, approve: bool) -> dict:
         return {"error": "That window isn't there any more, sir.", "code": "no_focus"}
     computer.begin(s.hwnd)
     await _look(s)  # the screen may have moved on while the card waited
+    if pending.get("do") == "click":
+        # the numbers change on every read, so find the button you actually approved, by its name
+        want = pending.get("_label", "")
+        match = next((it["n"] for it in (s.screen.items if s.screen else []) if (it["name"] or it["kind"]) == want), None)
+        if match is None:
+            return {"error": "That button isn't where it was, sir. Ask me again.", "code": "moved"}
+        pending = {**pending, "target": match}
     try:
         did = await _act(s, pending, approved=True)
     except NeedsYes:
@@ -259,7 +266,7 @@ async def _loop(s: Session) -> dict:
         try:
             did = await _act(s, obj)
         except NeedsYes as e:
-            s.pending = obj
+            s.pending = {**obj, "_label": e.label}  # the screen is read again before it runs: match by name, not number
             _paused[s.id] = s
             if s.step:
                 s.step(f"cw{s.step_n}", "waiting", "waiting for your OK", None, label)

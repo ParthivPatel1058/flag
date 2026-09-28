@@ -87,7 +87,8 @@ async def answer(question: str, topic: str, lang: str = "en") -> dict:
     """{spoken, sources: [{title, url, site}], ms, model}. Raises KnowledgeError when nothing at all was found."""
     t0 = time.perf_counter()
     pages, news, web = await asyncio.gather(wikipedia_all(topic, lang), asyncio.wait_for(headlines(topic), 6),
-                                            websearch.search(question if question != topic else topic, 4), return_exceptions=True)
+                                            asyncio.wait_for(websearch.search(question if question != topic else topic, 4), 6),
+                                            return_exceptions=True)
     pages = pages if isinstance(pages, list) else []
     news = news if isinstance(news, list) else []  # slow news doesn't hold up the answer
     web = web if isinstance(web, list) else []  # the web, when a Tavily key is saved

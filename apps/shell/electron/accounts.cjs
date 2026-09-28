@@ -70,6 +70,7 @@ const GOOGLE_BLOCKED = /accounts\.google\.com\/.*(?:rejected|disallowed_useragen
 const LOGIN_RX = /(\/login|\/signin|\/sign-in|\/sign_in|\/accounts\/login|\/uas\/login|\/checkpoint|\/i\/flow\/login|accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|\/authwall)/i;
 
 let ctx = null; // { core(): {port, token}, notify(channel, payload), isTrusted(url) }
+let stopping = false; // PLAG is quitting: no new watchers, whatever closes
 let accounts = [];
 const live = new Map(); // id -> { watcher, login, state, unread, lastNotice, lastCount, events: [] }
 
@@ -241,7 +242,8 @@ function openWindow(a, url) {
   w.on('closed', () => {
     l.login = null;
     log(a.host, 'sign-in window closed');
-    if (a.watch !== false) restartWatcher(a); // signed in just now: start watching with the fresh session
+    // Electron fires this after destroy() too, so a removed account (or a quit) must not get a watcher back
+    if (a.watch !== false && !stopping && accounts.includes(a)) restartWatcher(a); // signed in just now: start watching
   });
 }
 
@@ -315,6 +317,8 @@ function watchingCount() {
 }
 
 function startWatcher(a) {
+  if (stopping || !accounts.includes(a)) return; // removed while a timer was pending, or PLAG is quitting
+  stopWatcher(a); // never two hidden windows for one account
   const l = live.get(a.id) || {};
   live.set(a.id, l);
   if (a.watch === false) { l.state = 'paused'; push(); return; }
@@ -438,6 +442,7 @@ function init(options) {
   handle('plag:account-remove', async (_event, id) => {
     const a = accounts.find((x) => x.id === id);
     if (!a) return false;
+    a.watch = false; // so the sign-in window's "closed" handler doesn't start a watcher for a gone account
     stopWatcher(a);
     const l = live.get(a.id);
     if (l?.login && !l.login.isDestroyed()) l.login.destroy();
@@ -465,6 +470,7 @@ function startAll() {
 }
 
 function stopAll() {
+  stopping = true;
   for (const a of accounts) stopWatcher(a);
 }
 
