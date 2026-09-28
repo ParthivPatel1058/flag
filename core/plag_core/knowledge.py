@@ -16,7 +16,7 @@ import urllib.parse
 import httpx
 
 from .config import MODELS
-from .gemini import ProviderError, gemini
+from .gemini import gemini
 from .groq import groq
 from .nvidia import nvidia
 from .websearch import websearch

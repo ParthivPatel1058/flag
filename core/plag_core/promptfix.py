@@ -10,7 +10,7 @@ import asyncio
 import re
 
 from .config import MODELS
-from .gemini import ProviderError, gemini
+from .gemini import gemini
 from .groq import groq
 from .nvidia import nvidia
 
