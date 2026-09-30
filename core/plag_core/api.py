@@ -19,8 +19,8 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import __version__, approvals, whatsapp
-from . import documents, drafts, imagegen, inbox, location, model3d, navigation, weather
+from . import __version__, approvals, keyfile, whatsapp
+from . import drafts, imagegen, inbox, location, model3d, navigation, weather
 from .websearch import websearch
 from .tinyfish import TinyFishError, tinyfish
 from .calcom import CalError, calcom
@@ -238,6 +238,11 @@ async def _warm_voice() -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
+    # your own keys from %LOCALAPPDATA%\\PLAG\\keys.json, before anything that needs one (see keyfile.py)
+    with contextlib.suppress(Exception):
+        loaded = await asyncio.to_thread(keyfile.load)
+        if loaded:
+            log.info("keys loaded from your keys file: %s", ", ".join(loaded))
     tasks = [asyncio.create_task(_metrics_loop()), asyncio.create_task(_parent_watchdog()),
              asyncio.create_task(_reminder_loop()), asyncio.create_task(_idle_loop()),
              asyncio.create_task(inbox.worker()), asyncio.create_task(inbox.gmail_poller())]
@@ -1036,8 +1041,9 @@ class KeyRequest(BaseModel):
 
 @app.get("/v1/keys")
 async def keys_status():
-    """Which optional keys are saved (never the keys themselves)."""
-    return {"keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()}}
+    """Which optional keys are saved (never the keys themselves), and whether your keys file was found."""
+    return {"keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()},
+            "file": await asyncio.to_thread(keyfile.status)}
 
 
 @app.post("/v1/keys/{service}")

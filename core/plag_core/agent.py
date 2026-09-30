@@ -8,6 +8,7 @@ The approval flow (an L2 tool waits for your "yes") stays for future tools; noth
 
 import asyncio
 import difflib
+import logging
 import os
 import re
 import time
@@ -38,10 +39,12 @@ from .nvidia import nvidia
 from .policy import Forbidden, Halted, NeedsApproval, policy
 from .system import diagnose
 from .tinyfish import TinyFishError, tinyfish
-from .tools import DRY_RUN, run_tool, spec_of, wait_for_title
+from .tools import DRY_RUN, known_tool, run_tool
 
 UI_COMMANDS = ["stop", "halt", "mute", "unmute", "lang_hi", "lang_en", "lang_auto", "camera_on", "camera_off",
                "wake_off", "stop_nav"]
+log = logging.getLogger("plag.agent")
+
 MEMORY_ACTIONS = ["remember", "recall", "forget", "remind", "reminders", "reminder_cancel"]
 GOOGLE_ACTIONS = ["gmail_check", "calendar_check"]
 IMAGE_ACTIONS = ["generate_image", "imagine_camera"]
@@ -1204,7 +1207,16 @@ class Agent:
             return out
 
         tool_name = intent.action
-        spec = spec_of(tool_name)
+        if not known_tool(tool_name):
+            # A brain invented an action name. They are given the list, but don't always keep to it, and until now
+            # that ended the turn with a bare 500 instead of a reply. Say so and carry on.
+            log.warning("the AI asked for %r, which isn't one of PLAG's actions", tool_name)
+            step("act", "failed", f"PLAG has no action called \u201c{tool_name}\u201d")
+            out["mood"] = "sorry"
+            out["reply"] = _say(lang, "I can't do that one, sir. Try saying it another way.",
+                                "मैं यह नहीं कर सकता, सर। इसे दूसरे तरीके से कहिए।",
+                                "Main yeh nahi kar sakta, sir. Ise dusre tarike se kahiye.")
+            return out
         bus.publish("status.changed", {"state": "executing"}, task_id)
         step("act", "running", {"open_url": "Opening, then checking the page loaded", "web_search": "Opening the search, then checking results show",
                                 "open_app": "Starting, then checking its window", "play_youtube": "Finding the video"}.get(tool_name, "Working"))
@@ -1852,7 +1864,7 @@ class Agent:
             tool, targs = "cal_book", {"event_type_id": et["id"], "start": start, "name": args["name"], "email": args["email"],
                                        "notes": args.get("notes", "")}
             summary = f"{et['title']} ({et['length']} min) with {args['name']} <{args['email']}>, {cal.say_time(start)}"
-            title = f"Book on Cal.com"
+            title = "Book on Cal.com"
         else:
             b = await cal.calcom.find(args["who"])
             if b is None:

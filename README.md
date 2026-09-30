@@ -11,18 +11,21 @@ core         plag-core: agent, tools, policy, audit log, local API (Python 3.12,
 
 ## First-time setup
 
-1. Store the Gemini API key in Windows Credential Manager (never in a file):
+1. **Your keys, once.** Right-click `setup-keys.ps1` → **Run with PowerShell**, paste each key, press Enter.
+   Press Enter on its own to skip one; only Gemini is really needed to start.
+
+   It writes `%LOCALAPPDATA%\PLAG\keys.json`, and PLAG loads it into Windows Credential Manager every time it
+   starts — so you never type a key into Settings again. Run the script again any time to change one.
+
+   That file stays on your laptop. Keys are deliberately **not** in the source code: everything in the source goes
+   to GitHub, and a key that reaches GitHub is public forever — it stays in the history, and GitHub's scanners and
+   every fork can read it, even in a private repo. `keys.json` is in `.gitignore` so it can't be committed by
+   accident. `keys.example.json` shows the format if you'd rather write the file yourself.
+
+   Prefer to do it by hand? Credential Manager still works directly:
 
    ```
    python -c "import keyring,getpass; keyring.set_password('PLAG','gemini_api_key', getpass.getpass('Gemini key: '))"
-   ```
-
-   NVIDIA keys, the same way (each prompt asks for one key; paste it and press Enter):
-
-   ```
-   python -c "import keyring,getpass; keyring.set_password('PLAG','nvidia_hearing_api_key', getpass.getpass('Hearing (Parakeet) key: '))"
-   python -c "import keyring,getpass; keyring.set_password('PLAG','nvidia_muse_api_key', getpass.getpass('Muse key: '))"
-   python -c "import keyring,getpass; keyring.set_password('PLAG','nvidia_glm_api_key', getpass.getpass('GLM 5.3 Flash key: '))"
    ```
 
    *Hearing* is NVIDIA Parakeet, which understands what you say in English, Hindi and Hinglish (it falls back to
@@ -174,8 +177,9 @@ when someone in your inbox asks to meet, PLAG's drafted reply can offer your boo
 
 Add both keys in ⚙ Settings → **Keys** (each is checked with its service before it's saved).
 
-**Keys that make PLAG better** (all optional except Gemini; each one saved the same way as step 1 of setup, name
-after `PLAG /`):
+**Keys that make PLAG better** (all optional except Gemini). `setup-keys.ps1` asks for the common ones; for any
+other, add a line to `%LOCALAPPDATA%\PLAG\keys.json` under the name in the first column, or save it in Credential
+Manager under `PLAG /` that name:
 
 | Key name | What it adds | Where to get it |
 |---|---|---|
