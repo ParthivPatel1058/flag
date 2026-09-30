@@ -59,8 +59,9 @@ def tool(spec: ToolSpec):
     return register
 
 
-def spec_of(name: str) -> ToolSpec:
-    return _REGISTRY[name][0]
+def known_tool(name: str) -> bool:
+    """Is this a real tool? The AI brains don't always keep to the list of actions they were given."""
+    return name in _REGISTRY
 
 
 async def run_tool(name: str, args: dict, *, task_id: str, origin: str, approved: bool = False) -> ToolResult:

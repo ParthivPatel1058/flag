@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
-  clearCaches, elevenVoices, loadKeys, loadSettings, removeKey, saveKey, removeElevenKey, removeFishKey, removeSarvamKey, saveElevenKey, saveFishKey, saveSarvamKey,
+  clearCaches, elevenVoices, loadKeyFile, loadKeys, loadSettings, removeKey, saveKey, removeElevenKey, removeFishKey, removeSarvamKey, saveElevenKey, saveFishKey, saveSarvamKey,
   saveSettings,
-  type ElevenStatus, type KeyService, type Live, type Settings, type VoiceEngine,
+  type ElevenStatus, type KeyFile, type KeyService, type Live, type Settings, type VoiceEngine,
 } from '../lib/voice';
 import { CloseIcon } from './icons';
 
@@ -22,7 +22,8 @@ function KeysSection() {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { void loadKeys().then(setKeys); }, []);
+  const [file, setFile] = useState<KeyFile | null>(null);
+  useEffect(() => { void loadKeys().then(setKeys); void loadKeyFile().then(setFile); }, []);
   const save = async (id: KeyService) => {
     setBusy(true);
     const err = await saveKey(id, value);
@@ -35,6 +36,13 @@ function KeysSection() {
     <section className="set-sec">
       <h3>Keys</h3>
       <p className="set-note">Optional connections. Each key is checked with its service, then kept in Windows Credential Manager; PLAG never shows it again.</p>
+      {file ? (
+        <p className={`set-note ${file.found ? 'ok' : ''}`}>
+          {file.found
+            ? `Your keys file loaded ${file.keys.length} key${file.keys.length === 1 ? '' : 's'} at startup, so you don’t have to type any of these: ${file.path}`
+            : `Tip: run setup-keys.ps1 once and PLAG loads every key by itself from ${file.path} — no typing here again.`}
+        </p>
+      ) : null}
       {KEY_ROWS.map((k) => (
         <div key={k.id} className="key-row">
           <div className="set-row">

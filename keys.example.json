@@ -1,0 +1,15 @@
+{
+  "_readme": "Copy this to %LOCALAPPDATA%\\PLAG\\keys.json (or run setup-keys.ps1) and put your real keys in. Never commit the filled-in copy: git ignores keys.local.json and keys.json for exactly that reason.",
+  "gemini": "",
+  "groq": "",
+  "nvidia_glm": "",
+  "nvidia_muse": "",
+  "nvidia_speech": "",
+  "nvidia": "",
+  "elevenlabs": "",
+  "fishaudio": "",
+  "tavily": "",
+  "tinyfish": "",
+  "calcom": "",
+  "overwrite": true
+}

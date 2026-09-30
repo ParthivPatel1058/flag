@@ -402,11 +402,12 @@ export class Speaker {
   }
 }
 
-/** Short, quiet interface sounds: start listening, still listening after a reply (softer), stop, error. */
-export function earcon(kind: 'start' | 'follow' | 'stop' | 'error') {
+/** Short, quiet interface sounds: PLAG heard its name, start listening, still listening (softer), stop, error. */
+export function earcon(kind: 'wake' | 'start' | 'follow' | 'stop' | 'error') {
+  if (kind === 'wake') return wakeChime();
   const ctx = output();
   if (ctx.state === 'suspended') void ctx.resume();
-  const notes: Record<typeof kind, [number, number][]> = {
+  const notes: Record<Exclude<typeof kind, 'wake'>, [number, number][]> = {
     start: [[660, 0], [990, 0.07]],
     follow: [[880, 0]],
     stop: [[880, 0], [587, 0.07]],
@@ -425,4 +426,68 @@ export function earcon(kind: 'start' | 'follow' | 'stop' | 'error') {
     osc.start(now + at);
     osc.stop(now + at + 0.18);
   }
+}
+
+/**
+ * The sound the moment PLAG hears its name, in the spirit of Alexa's: two quick rising notes with a soft bell
+ * timbre (each note is its own frequency plus a quieter one an octave up, so it rings rather than beeps).
+ * It is built and started synchronously, before anything is awaited, so it lands within a few milliseconds.
+ */
+function wakeChime() {
+  const ctx = output();
+  if (ctx.state === 'suspended') void ctx.resume();
+  const now = ctx.currentTime + 0.005;
+  for (const [freq, at, peak] of [[784, 0, 0.075], [1175, 0.085, 0.065]] as const) {
+    for (const [mult, share] of [[1, 1], [2, 0.32], [3, 0.1]] as const) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq * mult;
+      gain.gain.setValueAtTime(0, now + at);
+      gain.gain.linearRampToValueAtTime(peak * share, now + at + 0.008); // a soft edge, never a click
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + at);
+      osc.stop(now + at + 0.24);
+    }
+  }
+}
+
+/** Turn a WAV into playable audio once, so playing it later costs nothing (PLAG's "Yes sir?"). */
+export async function decodeWav(wav: ArrayBuffer): Promise<AudioBuffer> {
+  const ctx = output();
+  return ctx.decodeAudioData(wav.slice(0));
+}
+
+/**
+ * Play a short already-decoded clip straight to the speakers, outside the Speaker that plays replies, so opening
+ * the microphone (which stops any reply in progress) can never cut it off. Used for "Yes sir?".
+ */
+export function playClip(audio: AudioBuffer): Promise<void> {
+  const ctx = output();
+  if (ctx.state === 'suspended') void ctx.resume();
+  const src = ctx.createBufferSource();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  src.buffer = audio;
+  src.connect(analyser);
+  analyser.connect(ctx.destination);
+  const buf = new Float32Array(analyser.fftSize);
+  let raf = 0;
+  const tick = () => {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    live.speak = Math.min(1, Math.sqrt(sum / buf.length) / 0.14);
+    raf = requestAnimationFrame(tick);
+  };
+  return new Promise<void>((resolve) => {
+    src.onended = () => {
+      cancelAnimationFrame(raf);
+      live.speak = 0;
+      resolve();
+    };
+    src.start();
+    tick();
+  });
 }

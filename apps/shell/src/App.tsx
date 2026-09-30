@@ -6,8 +6,8 @@ import TitleBar from './components/TitleBar';
 import { call, openEvents } from './lib/core';
 import { onInboxNew, refreshInbox, watchAccounts } from './lib/inbox';
 import {
-  finishListening, haltPlag, loadSettings, onAck, onModel3dReady, onPlagSay, onReminder, onVoiceStop, onWake, refreshMemory,
-  refreshReminders, setWake,
+  finishListening, haltPlag, loadSettings, onAck, onModel3dReady, onPlagSay, onReminder, onVoiceStop, onWake, primeAck,
+  refreshMemory, refreshReminders, setWake,
   startListening, stopAll, syncWake, toggleListening,
 } from './lib/voice';
 import { useStore } from './state/store';
@@ -44,6 +44,7 @@ export default function App() {
             void refreshReminders();
             void refreshInbox();
             void loadSettings(); // listening speed for the mic
+            void primeAck(); // "Yes sir?" made and decoded now, so the first "PLAG" answers instantly
           }
         },
       ),

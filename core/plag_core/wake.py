@@ -9,7 +9,9 @@ Two Whisper sizes, measured 2026-09-24 on this laptop (median of 3, Kokoro-voice
   heard "Plug in the charger" as "PLAG in the charger", so a wake with an unclear command is re-checked.
 - "base" hears commands on this laptop when ElevenLabs doesn't: ~0.7 s, +~50 MB. It loads only when needed and is
   freed after 10 idle minutes; with ElevenLabs hearing your commands it never loads at all.
-A short phrase ("PLAG") ends after 0.45 s of quiet instead of the full pause, so the wake answers sooner.
+A short phrase ("PLAG") ends after 0.35 s of quiet instead of the full pause, so the wake answers sooner: name
+heard to "Yes sir?" is about 0.7 s, most of it Whisper. The dashboard beeps the moment the wake arrives and has
+"Yes sir?" already voiced and decoded in memory, so neither adds anything.
 """
 
 import asyncio
@@ -37,7 +39,7 @@ BLOCK = 480  # 30 ms
 PROMPT = ("Assistant name: PLAG. PLAG, open YouTube, Google, WhatsApp, Gmail. Search, play, weather, lecture, class 10th, "
           "kholo, chalao.")
 MAX_PHRASE_S = 12.0  # a long command ("…class 10th lecture on YouTube") isn't cut off
-SHORT_PHRASE_S, SHORT_PAUSE_S = 1.3, 0.45  # "PLAG" on its own ends quickly
+SHORT_PHRASE_S, SHORT_PAUSE_S = 1.3, 0.35  # "PLAG" on its own ends quickly, so the answer comes back sooner
 LISTEN_MODEL, COMMAND_MODEL = "tiny", "base"
 # "flag" too: it's how the user says it, and how speech-to-text often spells "PLAG" (2026-09-24)
 EXACT_WAKE = {"plag", "plagg", "plaag", "flag", "flagg"}  # look-alikes ("plug", "plague") need a real command after them

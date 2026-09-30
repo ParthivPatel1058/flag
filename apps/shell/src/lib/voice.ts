@@ -1,5 +1,5 @@
 // The conversation loop: wake -> listen -> send to core -> show reply -> speak it -> follow up.
-import { MicRecorder, Speaker, earcon, endpoint } from './audio';
+import { MicRecorder, Speaker, decodeWav, earcon, endpoint, playClip } from './audio';
 import { camera, cameraError } from './camera';
 import { call, CoreError, stream } from './core';
 import { agentLive, onAgentResult, startAgent, stopAgent } from './agent';
@@ -217,16 +217,48 @@ export async function say(reply: string, ctrl?: AbortController, mood = 'calm', 
   }
 }
 
-/** "Yes sir?" — instant, local, the moment PLAG hears its name. */
+const ackLine = (lang: Lang) => (lang === 'hi' ? 'जी सर?' : 'Yes sir?');
+// "Yes sir?" fetched and decoded once, so hearing your name costs no network and no decoding: it just plays.
+const ackClips = new Map<Lang, AudioBuffer>();
+let acking: Promise<AudioBuffer> | null = null;
+
+/**
+ * Make "Yes sir?" ready before it's ever needed (at startup, and whenever the language changes). Without this the
+ * first wake waited for the core to voice the line, which is what made it feel slow.
+ */
+export async function primeAck(lang?: Lang): Promise<void> {
+  const want = lang ?? useStore.getState().lang;
+  if (ackClips.has(want) || acking) return;
+  acking = voiceWav(ackLine(want), 'calm').then(decodeWav);
+  try {
+    ackClips.set(want, await acking);
+  } catch {
+    /* no voice yet (the core is still starting): acknowledge() falls back, and the next wake primes it again */
+  } finally {
+    acking = null;
+  }
+}
+
+/**
+ * "Yes sir?" — the moment PLAG hears its name. Played on its own, not through the reply Speaker, so opening the
+ * microphone alongside it can't cut it off; both happen at once rather than one after the other.
+ */
 async function acknowledge(): Promise<void> {
   const s = useStore.getState();
   const hindi = s.lang === 'hi';
-  const line = hindi ? 'जी सर?' : 'Yes sir?';
+  const line = ackLine(s.lang);
   s.sayLocal(line, hindi ? 'hi' : 'en');
   if (!s.voiceOn) return;
   s.setSpeaking(true);
   try {
-    await speaker.play(await voiceWav(line, 'calm')); // pre-made at startup: instant
+    const ready = ackClips.get(s.lang);
+    if (ready) {
+      await playClip(ready); // already in memory: it starts on this frame
+      return;
+    }
+    const clip = await voiceWav(line, 'calm').then(decodeWav);
+    ackClips.set(s.lang, clip);
+    await playClip(clip);
   } catch {
     const voice = localVoice(hindi ? 'hi' : 'en') ?? localVoice('en');
     if (voice) await speakLocal(hindi && !localVoice('hi') ? 'Yes sir?' : line, voice);
@@ -247,6 +279,7 @@ export async function onWake(evt: { text?: string; rest?: string; confidence?: n
     await runTurn({ kind: 'audio', wav: toBuffer(evt.audio), hint: evt.rest, followUp: 'window' });
     return;
   }
+  earcon('wake'); // first, before anything is awaited: you hear PLAG notice you within a few milliseconds
   // "PLAG, ..." while PLAG is talking or thinking: that's an interruption, the new request wins
   if (s.pending || s.speaking) await stopAll();
   window.plag?.reveal();
@@ -258,11 +291,15 @@ export async function onWake(evt: { text?: string; rest?: string; confidence?: n
     await runTurn({ kind: 'audio', wav: toBuffer(evt.audio), hint: evt.rest });
     return;
   }
-  // the mic opens now and "Yes sir?" plays at the same moment: you can start talking without waiting for it
+  // the mic opens and "Yes sir?" plays at the same moment: you can start talking without waiting for either
+  const said = acknowledge().catch(() => undefined); // caught here too: if the mic fails, nothing is left unhandled
   await startListening();
-  if (!mic.active) return;
-  mic.holding = true;
-  await acknowledge();
+  if (!mic.active) {
+    await said;
+    return;
+  }
+  mic.holding = true; // PLAG's own "Yes sir?" is in the room: only a clearly louder voice (yours) counts
+  await said;
   mic.holding = false;
 }
 
@@ -286,6 +323,7 @@ useStore.subscribe((now, before) => {
   if (now.speaking !== before.speaking) {
     call('/v1/voice/speaking', { json: { speaking: now.speaking } }).catch(() => undefined);
   }
+  if (now.lang !== before.lang) void primeAck(now.lang); // "जी सर?" ready before the first wake in Hindi
 });
 
 export async function setWake(on: boolean): Promise<void> {
@@ -1148,9 +1186,20 @@ export async function removeFishKey(): Promise<void> {
 
 export type KeyService = 'tinyfish' | 'calcom' | 'tavily' | 'groq';
 
+/** Your keys file on this laptop: where it is, whether PLAG found it, and which keys it holds (never a key itself). */
+export type KeyFile = { found: boolean; path: string; keys: string[] };
+
 export async function loadKeys(): Promise<Record<KeyService, boolean> | null> {
   try {
     return (await call<{ keys: Record<KeyService, boolean> }>('/v1/keys')).keys;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadKeyFile(): Promise<KeyFile | null> {
+  try {
+    return (await call<{ file: KeyFile }>('/v1/keys')).file ?? null;
   } catch {
     return null;
   }

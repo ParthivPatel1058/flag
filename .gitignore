@@ -16,3 +16,9 @@ __pycache__/
 
 # logs
 *.log
+
+# your own API keys, loaded from this laptop only (see setup-keys.ps1) — never committed
+keys.json
+keys.local.json
+**/keys.json
+!keys.example.json
