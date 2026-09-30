@@ -9,6 +9,7 @@ import {
 } from '../lib/inbox';
 import { TrashIcon } from './icons';
 import { useStore, type Account, type Connector, type InboxItem } from '../state/store';
+import AgentsView from './AgentsView';
 
 function Sparkline({ values, max, tone = 'lime' }: { values: number[]; max?: number; tone?: 'lime' | 'bone' | 'warn' }) {
   const gid = `g${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -430,6 +431,7 @@ function InboxView() {
 
 const TABS = [
   { id: 'conversation', label: 'Conversation' },
+  { id: 'agents', label: 'Agents' },
   { id: 'inbox', label: 'Inbox' },
   { id: 'memory', label: 'Memory' },
   { id: 'reminders', label: 'Reminders' },
@@ -442,7 +444,8 @@ export function ConversationPanel() {
   const nMemories = useStore((s) => s.memories.length);
   const nReminders = useStore((s) => s.reminders.length);
   const nInbox = useStore((s) => s.inbox.filter((i) => i.status === 'new').length);
-  const counts = { conversation: 0, inbox: nInbox, memory: nMemories, reminders: nReminders };
+  const nAgents = useStore((s) => s.agents.filter((a) => a.enabled).length);
+  const counts = { conversation: 0, agents: nAgents, inbox: nInbox, memory: nMemories, reminders: nReminders };
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
@@ -456,7 +459,7 @@ export function ConversationPanel() {
           </button>
         ))}
       </header>
-      {tab === 'memory' ? <MemoryView /> : tab === 'reminders' ? <RemindersView /> : tab === 'inbox' ? <InboxView /> : (
+      {tab === 'agents' ? <AgentsView /> : tab === 'memory' ? <MemoryView /> : tab === 'reminders' ? <RemindersView /> : tab === 'inbox' ? <InboxView /> : (
       <div className="convo-list">
         {messages.length ? (
           messages.map((m) => (

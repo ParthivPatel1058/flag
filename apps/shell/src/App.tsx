@@ -4,6 +4,7 @@ import { ConnectionsPanel, ConversationPanel, HaltOverlay, NowPanel, VitalsPanel
 import Stage from './components/Stage';
 import TitleBar from './components/TitleBar';
 import { call, openEvents } from './lib/core';
+import { loadAgents } from './lib/agents';
 import { onInboxNew, refreshInbox, watchAccounts } from './lib/inbox';
 import {
   finishListening, haltPlag, loadSettings, onAck, onModel3dReady, onPlagSay, onReminder, onVoiceStop, onWake, primeAck,
@@ -34,6 +35,7 @@ export default function App() {
           else if (e.topic === 'reminders.changed') void refreshReminders();
           else if (e.topic === 'inbox.changed') void refreshInbox();
           else if (e.topic === 'inbox.new') void onInboxNew(e.data);
+          else if (e.topic === 'agents.changed') void loadAgents();
           else useStore.getState().handleEvent(e);
         },
         (up) => {
@@ -43,6 +45,7 @@ export default function App() {
             void refreshMemory();
             void refreshReminders();
             void refreshInbox();
+            void loadAgents(); // the Agents tab: your agents, the brains with a key, and the tool catalogue
             void loadSettings(); // listening speed for the mic
             void primeAck(); // "Yes sir?" made and decoded now, so the first "PLAG" answers instantly
           }

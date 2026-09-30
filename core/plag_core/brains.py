@@ -41,19 +41,36 @@ def all_failed(errors: list[Exception]) -> ProviderError:
 async def race(system: str, schema: dict, text: str, *, history: list[tuple[str, str]] | None = None,
                deep: bool = False, accept: Callable[[dict], bool] = lambda o: bool(o), timeout: float = 25.0,
                grace: float = 8.0, max_tokens: int = 700, route: str = "turn",
-               gemini_models: list[str] | None = None) -> tuple[str, dict]:
-    """(model, answer) from the brain team. `accept` rejects answers that are plainly unusable."""
+               gemini_models: list[str] | None = None, nvidia_models: list[str] | None = None) -> tuple[str, dict]:
+    """(model, answer) from the brain team. `accept` rejects answers that are plainly unusable.
+
+    An agent can pin its own brain (Agents tab): `nvidia_models=[GLM]` asks GLM alone, `gemini_models=[]` leaves
+    Gemini out, and so on. None means "whoever is available", which is how the rest of PLAG races. A pinned brain
+    with no key would leave nobody to ask, so the race quietly falls back to the whole team instead of failing.
+    """
     history = history or []
-    jobs: dict[asyncio.Task, str] = {}
-    jobs[asyncio.create_task(gemini.turn(system=system, schema=schema, history=history, text=text,
-                                         models=gemini_models or MODELS["turn"], route=route))] = "fast"
-    for m in nvidia.models():
-        think = deep and m in THINKERS
-        jobs[asyncio.create_task(nvidia.turn(system=system, history=history, text=text, schema=schema, model=m,
-                                             max_tokens=max_tokens, think=think,
-                                             timeout=(timeout + grace) if think else None))] = "deep" if think else "fast"
-    if groq.ready():
-        jobs[asyncio.create_task(groq.turn(system=system, history=history, text=text, schema=schema))] = "fast"
+
+    def build() -> dict[asyncio.Task, str]:
+        jobs: dict[asyncio.Task, str] = {}
+        if gemini_models != []:
+            jobs[asyncio.create_task(gemini.turn(system=system, schema=schema, history=history, text=text,
+                                                 models=gemini_models or MODELS["turn"], route=route))] = "fast"
+        want = nvidia.models() if nvidia_models is None else [m for m in nvidia.models() if m in nvidia_models]
+        for m in want:
+            think = deep and m in THINKERS
+            jobs[asyncio.create_task(nvidia.turn(system=system, history=history, text=text, schema=schema, model=m,
+                                                 max_tokens=max_tokens, think=think,
+                                                 timeout=(timeout + grace) if think else None))] = "deep" if think else "fast"
+        if groq.ready():
+            jobs[asyncio.create_task(groq.turn(system=system, history=history, text=text, schema=schema))] = "fast"
+        return jobs
+
+    jobs = build()
+    if not jobs and (gemini_models is not None or nvidia_models is not None):
+        gemini_models = nvidia_models = None  # the pinned brain has no key: ask everyone rather than nobody
+        jobs = build()
+    if not jobs:
+        raise all_failed([ProviderError("no brain has a key", "no_key")])
     has_thinker = "deep" in jobs.values()
     end = time.monotonic() + timeout + (grace if has_thinker else 0)
     best: tuple[str, dict] | None = None

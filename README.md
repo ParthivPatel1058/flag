@@ -193,11 +193,58 @@ Manager under `PLAG /` that name:
 | `tinyfish_api_key` | Web search and page reading (free), plus a web agent that does tasks on real websites (uses TinyFish credits) | agent.tinyfish.ai → API keys |
 | `calcom_api_key` | Cal.com: your meetings, free slots, booking link, and booking / cancelling / moving by voice | Cal.com → Settings → Security |
 | `tavily_api_key` | Backup web search when TinyFish isn't set up | tavily.com (1,000 free a month) |
+| `github_token` | The CodeRabbit agent: reads pull requests and posts reviews | github.com → Settings → Developer settings |
+| `mail_address` + `mail_password` | The Inbox agent: reads and sends your real email (an app password) | your mail provider |
 | `fishaudio_api_key` | The **Jarvis voice** on Fish Audio, PLAG's first voice once saved (Settings → Voice → Jarvis) | fish.audio → API keys |
 | `sarvam_api_key` | Indian voices (Settings → Voice) | dashboard.sarvam.ai |
 | `elevenlabs_api_key` | Your own voice and realtime hearing (Settings → ElevenLabs) | elevenlabs.io |
 | `olamaps_api_key` | Directions with live traffic in India | maps.olakrutrim.com |
 | Google OAuth client (a file, not a key) | Gmail + Calendar, read-only (Connections → Connect) | console.cloud.google.com |
+
+### Agents
+
+The **Agents** tab is your own AI workers. Each agent is a name, a job written in your own words, a brain, and the
+tools it is allowed to use. Type what you want it to do and watch it work, step by step.
+
+Four come built in:
+
+| Agent | What it does |
+|---|---|
+| **Research** | Searches the web, reads the pages it finds, and writes a cited markdown report into `Documents\PLAG` |
+| **Inbox** | Reads your real mailbox over IMAP, tells you what matters, drafts replies, and sends them once you say yes |
+| **CodeRabbit** | Reads a pull request's diff on GitHub, reviews it for real defects, and posts the review |
+| **Laptop** | Takes control of Windows: opens apps, clicks and types through the rails in `computer.py` |
+
+**Making your own.** Describe it in one line — *"an agent that watches my college site and tells me about new
+notices"* — and press **Build it**: Muse designs it, picking from the real tool list, and it's saved ready to run.
+Or set one up yourself and choose the tools by hand. Every agent can be edited, switched off, or deleted.
+
+**Brains.** Every agent defaults to **GLM 5.3 Flash**. You can set any agent to Muse, Gemini, Groq, or *Auto*
+(race them all and take the first good answer). A brain with no key is shown greyed out rather than failing later.
+
+**By voice.** "Ask my research agent about X", "get the inbox agent to check my mail", "run my job hunt agent".
+And "take control of my laptop and …" hands the job to PLAG's desktop control.
+
+**What keeps it safe.** Each agent may use only the tools in its own list — checked in `agents.py`, not merely
+asked for in a prompt. Anything that leaves the laptop or changes it (sending mail, posting a review, typing on
+your desktop) stops for your approval card first, every time, and nothing happens until you say yes. Tool results —
+email bodies, web pages, pull request text — are data an agent reports on; it can't act on instructions hidden
+inside them, because the tools it would need aren't on its list.
+
+### Email (read and send)
+
+Connect a mailbox at the top of the Agents tab: your address and an **app password** (not your real password).
+PLAG signs in to check it before saving anything, then keeps it in Windows Credential Manager.
+
+| Where | App passwords |
+|---|---|
+| Gmail | [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (needs 2-step verification on) |
+| Outlook | [account.live.com/proofs/AppPassword](https://account.live.com/proofs/AppPassword) |
+| Yahoo | login.yahoo.com → Account security → Generate app password |
+| Anything else | Your provider's "app password" or "mail client password"; PLAG asks for the IMAP and SMTP servers if it doesn't know them |
+
+Reading is read-only — nothing is marked as seen. Sending always goes through an approval card. This replaces the
+old Google Cloud OAuth route for mail, which needed a cloud project, expired every 7 days, and could only read.
 
 **Inbox agent: your accounts (Gmail, LinkedIn, Instagram, X, anything):** Connections → *Your accounts* → **+ Connect**,
 type the site's address (`linkedin.com`) or pick one of the chips. PLAG opens the real sign-in page in its own window;

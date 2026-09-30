@@ -1184,7 +1184,7 @@ export async function removeFishKey(): Promise<void> {
 
 // ---------------------------------------------------------------- optional keys (Settings → Keys)
 
-export type KeyService = 'tinyfish' | 'calcom' | 'tavily' | 'groq';
+export type KeyService = 'tinyfish' | 'calcom' | 'tavily' | 'groq' | 'github';
 
 /** Your keys file on this laptop: where it is, whether PLAG found it, and which keys it holds (never a key itself). */
 export type KeyFile = { found: boolean; path: string; keys: string[] };

@@ -56,7 +56,8 @@ CREATIVE_ACTIONS = ["generate_3d", "weather", "weather_sim", "where", "write",  
                     "cal_bookings", "cal_slots", "cal_link", "cal_book", "cal_cancel", "cal_reschedule",  # Cal.com
                     "web_task",  # TinyFish's web agent: done on a real website, in its cloud browser
                     "computer_task",  # PLAG clicking and typing in your own apps to finish a job
-                    "agent_task"]  # autopilot: a goal PLAG works through on its own, step by step
+                    "agent_task",  # autopilot: a goal PLAG works through on its own, step by step
+                    "agent_run"]  # one of the user's own agents from the Agents tab, by name
 ACTIONS = ["none", "open_url", "open_app", "web_search", "play_youtube", "system_status", "whatsapp_send",
            "whatsapp_call", "whatsapp_open", "gmail_search", "research", "camera_look", "screen_look", "ui", *MEMORY_ACTIONS,
            *GOOGLE_ACTIONS, *IMAGE_ACTIONS, *CREATIVE_ACTIONS]
@@ -242,6 +243,10 @@ Return JSON for every user turn:
     and draw a poster about it". PLAG's autopilot then works through it on its own. action.text is the goal in the
     user's words (complete, in English). Don't use it for a single simple action, or a fixed list of simple actions
     (use the normal actions for those). Leave reply empty.
+  - "agent_run": one of the user's OWN agents from the Agents tab, called by name: "ask my research agent about X",
+    "run my job hunt agent", "get the inbox agent to check my mail", "CodeRabbit agent, review PR 12 on my repo".
+    action.contact is the agent's name as they said it; action.text is the job for it. Use this only when they name
+    an agent; a plain request is a normal action or agent_task.
   - Cal.com (the user's scheduling account; leave reply empty for all of these):
     - "cal_bookings": their booked meetings ("what meetings do I have", "any bookings tomorrow", "meri meetings").
       action.day "today" or "tomorrow" if they said, else leave it out (all upcoming).
@@ -263,7 +268,10 @@ Return JSON for every user turn:
     Leave reply empty.
   - "computer_task": a job in an app ON THIS LAPTOP that needs clicking and typing, which PLAG does itself: "in
     Word, change the phone number in my resume to X", "total column C in Excel", "rename these files in the folder",
-    "fill this form with my details", "close the tabs I'm not using". action.text is the job in the user's words
+    "fill this form with my details", "close the tabs I'm not using". This is also what "take control of my laptop",
+    "take my laptop control", "control my laptop", "laptop control", "do it on my laptop yourself", "mera laptop
+    sambhalo" and "laptop pe kar do" mean: whatever they ask for after that is action.text. If they say only "take
+    control of my laptop" with no job, ask what they want done (action "none") rather than guessing. action.text is the job in the user's words
     (complete, in English); action.app is the app to use if they named one (from the app list above), else leave it
     out. PLAG works in the window step by step and asks before anything risky. Use it only when the job really needs
     the app's own screen: opening a file, a site, an app or a search has its own action, and web_task is for reading
@@ -551,6 +559,9 @@ def _intent_from_action(a: dict, lang: str, reply: str) -> Intent:
                                    "goal": (a.get("text") or a.get("query")).strip()}, lang, "", "Web agent")
     elif kind == "agent_task" and (a.get("text") or a.get("query") or "").strip():
         return Intent("agent_task", {"goal": (a.get("text") or a.get("query")).strip()}, lang, "", "Autopilot")
+    elif kind == "agent_run" and (a.get("contact") or "").strip():
+        return Intent("agent_run", {"agent": a["contact"].strip(),
+                                    "task": (a.get("text") or a.get("query") or "").strip()}, lang, "", "Agent")
     elif kind == "inbox_check":
         return Intent("inbox_check", {}, lang, "", "Inbox")
     elif kind == "inbox_reply" and (a.get("contact") or "").strip():
@@ -689,6 +700,7 @@ def _action_label(intent: Intent) -> str:
             "save_place": f"Save a place as {args.get('label', '')}", "inbox_check": "Check your inbox",
             "inbox_reply": f"Draft a reply to {args.get('contact', '')}",
             "agent_task": f"Autopilot: {args.get('goal', '')[:60]}",
+            "agent_run": f"{args.get('agent', 'Agent')}: {args.get('task', '')[:50]}",
             "cal_bookings": "Cal.com: your meetings", "cal_slots": "Cal.com: free slots", "cal_link": "Cal.com: booking link",
             "cal_book": f"Cal.com: book with {args.get('name', '')}", "cal_cancel": f"Cal.com: cancel {args.get('who', '')}",
             "cal_reschedule": f"Cal.com: move {args.get('who', '')}",
@@ -704,7 +716,7 @@ def _in_step(step, index: int, label: str):
 
 
 # Plans worth an instant "On it." before the result: anything that takes more than a moment.
-_SLOW = {"agent_task", "web_task", "computer_task", "cal_bookings", "cal_slots", "web_search", "play_youtube", "whatsapp_send", "whatsapp_call", "whatsapp_open", "gmail_check", "gmail_search",
+_SLOW = {"agent_task", "agent_run", "web_task", "computer_task", "cal_bookings", "cal_slots", "web_search", "play_youtube", "whatsapp_send", "whatsapp_call", "whatsapp_open", "gmail_check", "gmail_search",
          "calendar_check", "generate_image", "research", "system_status", "weather", "weather_sim", "where",
          "write", "lookup"}
 CONTEXT_S = 600  # how long "the app you're in" carries over to your next command
@@ -1195,6 +1207,8 @@ class Agent:
             return await self._web_task(intent.args["url"], intent.args["goal"], lang, task_id, step, out)
         if intent.action == "agent_task":
             return await autopilot.run(self, intent.args["goal"], lang, task_id, step)
+        if intent.action == "agent_run":
+            return await self._agent_run(intent.args["agent"], intent.args.get("task", ""), lang, step, out)
         if intent.action in ("inbox_check", "inbox_reply"):
             return await self._inbox(intent, lang, step, out)
         if intent.action == "lookup":
@@ -1726,6 +1740,56 @@ class Agent:
         out["result"] = {"ok": True, "detail": detail, "state": "app_ready" if a != "list_files" else "done"}
         out["reply"] = reply
         out["mood"] = "calm"
+        return out
+
+    async def _agent_run(self, name: str, task: str, lang: str, step, out: dict) -> dict:
+        """"Ask my research agent about X" — find the agent they named and put it to work."""
+        from . import agents as agent_store
+
+        made = await asyncio.to_thread(agent_store.all_agents)
+        want = re.sub(r"\b(my|the|agent|wala|waala)\b", " ", name.casefold())
+        want = " ".join(want.split())
+        picked = None
+        for a in made:
+            low = a.name.casefold()
+            if low == want or (want and (want in low or low in want)):
+                picked = a
+                break
+        if picked is None and want:  # "coderabbit" for "code rabbit", "jobhunt" for "job hunt"
+            flat = re.sub(r"[^a-z0-9]", "", want)
+            picked = next((a for a in made if re.sub(r"[^a-z0-9]", "", a.name.casefold()) == flat), None)
+        if picked is None:
+            names = ", ".join(a.name for a in made if a.enabled) or "none yet"
+            step("act", "failed", "no agent by that name")
+            out["mood"] = "sorry"
+            out["reply"] = _say(lang, f"I don't have an agent called {name[:40]}, sir. You have: {names}.",
+                                f"{name[:40]} नाम का कोई एजेंट नहीं है, सर। आपके पास हैं: {names}।",
+                                f"{name[:40]} naam ka koi agent nahi hai, sir. Aapke paas hain: {names}.")
+            return out
+        if not picked.enabled:
+            step("act", "failed", f"{picked.name} is switched off")
+            out["mood"] = "sorry"
+            out["reply"] = _say(lang, f"{picked.name} is switched off, sir. Turn it on in the Agents tab.",
+                                f"{picked.name} बंद है, सर। Agents टैब में चालू कीजिए।",
+                                f"{picked.name} band hai, sir. Agents tab mein chaalu kijiye.")
+            return out
+        step("act", "running", f"{picked.name} is working")
+        try:
+            result = await agent_store.run(picked, task or "Do what you normally do.")
+        except (agent_store.AgentError, ProviderError) as e:
+            step("act", "failed", str(e)[:120])
+            out["mood"] = "sorry"
+            out["reply"] = str(e)
+            out["result"] = {"ok": False, "detail": str(e)[:160]}
+            return out
+        waiting = result["state"] == "waiting"
+        step("act", "waiting" if waiting else "done", (result["answer"] or "")[:120])
+        out["reply"] = result["answer"] or _say(lang, f"{picked.name} finished, sir.",
+                                                f"{picked.name} ने काम पूरा कर दिया, सर।",
+                                                f"{picked.name} ne kaam poora kar diya, sir.")
+        out["result"] = {"ok": result["state"] in ("done", "waiting"), "detail": f"{picked.name} · {result['state']}"}
+        out["client"] = {"type": "agent_run", "run_id": result["run_id"], "agent_id": picked.id, "name": picked.name}
+        out["mood"] = "calm" if not waiting else "curious"
         return out
 
     async def _computer(self, goal: str, app: str, lang: str, task_id: str, step, out: dict) -> dict:

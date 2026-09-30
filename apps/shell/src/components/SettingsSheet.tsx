@@ -13,6 +13,7 @@ const KEY_ROWS: { id: KeyService; name: string; what: string; where: string; url
   { id: 'calcom', name: 'Cal.com', what: 'Your meetings, free slots, booking link, and booking by voice (asks you first)', where: 'Cal.com → Settings → Security', url: 'https://app.cal.com/settings/developer/api-keys' },
   { id: 'groq', name: 'Groq', what: 'The fastest answers (Llama 3.3 70B), free', where: 'console.groq.com → API keys', url: 'https://console.groq.com/keys' },
   { id: 'tavily', name: 'Tavily', what: 'Backup web search when TinyFish isn’t set up', where: 'tavily.com → API keys', url: 'https://app.tavily.com' },
+  { id: 'github', name: 'GitHub', what: 'The CodeRabbit agent: reads pull requests and posts its reviews', where: 'github.com → Settings → Developer settings → Personal access tokens', url: 'https://github.com/settings/tokens' },
 ];
 
 /** Optional keys: each is checked with its service, then kept in Windows Credential Manager (never shown again). */

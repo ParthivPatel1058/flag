@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { CoreEvent } from '../lib/core';
 import { live } from '../lib/live';
+import type { Agent, AgentBrain, AgentRun, AgentStep, AgentTool, MailStatus } from '../lib/agents';
 
 export type Status =
   | 'booting' | 'idle' | 'listening' | 'thinking' | 'executing' | 'speaking' | 'halted' | 'offline' | 'watching';
@@ -100,7 +101,7 @@ export interface Reminder {
   text: string;
   due: string; // local ISO time
 }
-export type Tab = 'conversation' | 'inbox' | 'memory' | 'reminders';
+export type Tab = 'conversation' | 'agents' | 'inbox' | 'memory' | 'reminders';
 /** An account you connected by its address: you signed in on the real site; PLAG watches it for new messages. */
 export interface Account {
   id: string;
@@ -241,6 +242,12 @@ export interface PlagState {
   reminders: Reminder[];
   inbox: InboxItem[];
   accounts: Account[];
+  // the Agents tab: your own AI workers, the brains that have a key, the tool catalogue, and the runs in flight
+  agents: Agent[];
+  agentBrains: AgentBrain[];
+  agentTools: AgentTool[];
+  agentRuns: Record<string, AgentRun>;
+  mail: MailStatus;
   tab: Tab;
   image: GenImage | null;
   model3d: Model3D | null;
@@ -281,6 +288,9 @@ export interface PlagState {
   setInbox(i: InboxItem[]): void;
   setAccounts(a: Account[]): void;
   setTab(t: Tab): void;
+  startAgentRun(run: AgentRun): void;
+  addAgentStep(runId: string, step: AgentStep): void;
+  finishAgentRun(runId: string, patch: Partial<AgentRun>): void;
   setImage(i: GenImage | null): void;
   setModel3d(m: Model3D | null): void;
   setSim(w: WeatherSim | null): void;
@@ -338,6 +348,11 @@ export const useStore = create<PlagState>()((set, get) => ({
   memories: [],
   reminders: [],
   inbox: [],
+  agents: [],
+  agentBrains: [],
+  agentTools: [],
+  agentRuns: {},
+  mail: { connected: false, address: '' },
   accounts: [],
   tab: 'conversation',
   image: null,
@@ -414,6 +429,31 @@ export const useStore = create<PlagState>()((set, get) => ({
           return { procs: e.data as Proc[] };
         case 'connectors':
           return { connectors: e.data as Connector[] };
+        case 'agent.started': {
+          const d = e.data as { run_id: string; agent_id: string; task: string };
+          return s.agentRuns[d.run_id] ? {} : {
+            agentRuns: { ...s.agentRuns, [d.run_id]: { id: d.run_id, agent_id: d.agent_id, task: d.task,
+              state: 'running', answer: '', steps: [], started: new Date().toISOString(), finished: '',
+              ms: 0, brain: '' } as AgentRun },
+          };
+        }
+        case 'agent.step': {
+          const d = e.data as { run_id: string; step: AgentStep };
+          queueMicrotask(() => useStore.getState().addAgentStep(d.run_id, d.step));
+          return {};
+        }
+        case 'agent.approval': {
+          const d = e.data as { run_id: string; tool: string; summary: Record<string, string>; approval_id: string };
+          const run = s.agentRuns[d.run_id];
+          return run ? { agentRuns: { ...s.agentRuns, [d.run_id]: { ...run, state: 'waiting',
+            pending: { tool: d.tool, args: {}, approval_id: d.approval_id, summary: d.summary } } } } : {};
+        }
+        case 'agent.finished': {
+          const d = e.data as { run_id: string; state: AgentRun['state']; answer: string; ms: number; brain: string };
+          const run = s.agentRuns[d.run_id];
+          return run ? { agentRuns: { ...s.agentRuns, [d.run_id]: { ...run, state: d.state, answer: d.answer,
+            ms: d.ms, brain: d.brain, finished: new Date().toISOString(), pending: undefined } } } : {};
+        }
         case 'wake.state':
           return { wake: e.data as WakeStatus };
         case 'wake.level':
@@ -524,6 +564,21 @@ export const useStore = create<PlagState>()((set, get) => ({
   setInbox: (inbox) => set({ inbox }),
   setAccounts: (accounts) => set({ accounts }),
   setTab: (tab) => set({ tab }),
+
+  startAgentRun: (run) => set((s) => ({ agentRuns: { ...s.agentRuns, [run.id]: run } })),
+  addAgentStep: (runId, step) =>
+    set((s) => {
+      const run = s.agentRuns[runId];
+      if (!run) return {};
+      // a step that was "running" is replaced by its finished self, rather than shown twice
+      const steps = run.steps.length && run.steps[run.steps.length - 1].state === 'running'
+        && run.steps[run.steps.length - 1].tool === step.tool
+        ? [...run.steps.slice(0, -1), step]
+        : [...run.steps, step];
+      return { agentRuns: { ...s.agentRuns, [runId]: { ...run, steps } } };
+    }),
+  finishAgentRun: (runId, patch) =>
+    set((s) => (s.agentRuns[runId] ? { agentRuns: { ...s.agentRuns, [runId]: { ...s.agentRuns[runId], ...patch } } } : {})),
   // steps measured here, not in the core (how soon PLAG's voice started)
   addStep: (st) => set((s) => (s.task ? { task: { ...s.task, steps: upsertStep(s.task.steps, st) } } : {})),
   // one thing on the stage at a time: a picture, a 3D model or a weather simulation

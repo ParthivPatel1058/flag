@@ -56,9 +56,18 @@ ALIASES = {
     "nvidia_image": "nvidia_image_api_key",
     "nvidia_trellis": "nvidia_trellis_api_key",
     "nvidia_weather": "nvidia_weather_api_key",
+    "github": "github_token",
+    "github_token": "github_token",
+    "mail_address": "mail_address",
+    "email": "mail_address",
+    "mail_password": "mail_password",
+    "email_password": "mail_password",
+    "mail_imap": "mail_imap",
+    "mail_smtp": "mail_smtp",
 }
 # Anything else ending in _api_key (or the two Google OAuth values) is taken as it is.
-PASS_THROUGH = {"google_client", "google_refresh_token"}
+PASS_THROUGH = {"google_client", "google_refresh_token", "github_token",
+                "mail_address", "mail_password", "mail_imap", "mail_smtp", "mail_from_name"}
 SETTINGS = {"overwrite"}
 
 
@@ -121,7 +130,8 @@ def load() -> list[str]:
                 continue
             value = raw_value.strip()
             # placeholders from the example file, and anything obviously not a key, are skipped quietly
-            if len(value) < 10 or value.startswith(("<", "your", "YOUR", "paste", "PASTE")):
+            floor = 4 if name in ("mail_password", "mail_imap", "mail_smtp") else 10
+            if len(value) < floor or value.startswith(("<", "your", "YOUR", "paste", "PASTE")):
                 continue
             if not overwrite and get_secret(name):
                 continue

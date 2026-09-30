@@ -12,6 +12,7 @@ import re
 import subprocess
 import time
 
+import httpx
 import psutil
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import __version__, approvals, keyfile, whatsapp
+from . import __version__, agents, agenttools, approvals, keyfile, mail, whatsapp
 from . import drafts, imagegen, inbox, location, model3d, navigation, weather
 from .websearch import websearch
 from .tinyfish import TinyFishError, tinyfish
@@ -264,6 +265,8 @@ async def lifespan(_: FastAPI):
         t.cancel()
     await gemini.close()
     # every service that keeps connections open gets closed, so quitting never leaves sockets behind
+    with contextlib.suppress(Exception):
+        await agenttools.close()
     for owner in (google, eleven, groq, nvidia, tinyfish, calcom, fishaudio, sarvam, websearch, edgevoice):
         client = getattr(owner, "_http", None)
         if client is not None:
@@ -513,6 +516,26 @@ def websearch_row() -> dict:
     return {"id": "websearch", "name": "Web search", "role": "Real web results", "state": state, "detail": detail}
 
 
+def mail_row() -> dict:
+    st = mail.status()
+    if not st["connected"]:
+        state, detail = "off", "Off · Agents tab → Connect email: one app password and PLAG can read and send your mail"
+    else:
+        state, detail = "online", f"{st['address']} · reading is instant, sending always asks you first"
+    return {"id": "mail", "name": "Email", "role": "Read and send your email", "state": state, "detail": detail}
+
+
+def agents_row() -> dict:
+    try:
+        made = agents.all_agents()
+    except Exception as e:  # the tab must never take the dashboard down with it
+        return {"id": "agents", "name": "Agents", "role": "Your AI workers", "state": "degraded", "detail": str(e)[:90]}
+    on = [a for a in made if a.enabled]
+    return {"id": "agents", "name": "Agents", "role": "Your AI workers",
+            "state": "online" if on else "ready",
+            "detail": f"{len(on)} ready · {', '.join(a.name for a in on[:4])}" if on else "None switched on"}
+
+
 def connectors() -> list[dict]:
     def latest(models: list[str]) -> tuple[str, dict] | None:
         seen = [(m, gemini.health[m]) for m in models if m in gemini.health]
@@ -558,6 +581,8 @@ def connectors() -> list[dict]:
         location_row(),
         google_row(),
         inbox_row(),
+        mail_row(),
+        agents_row(),
         calcom_row(),
         tinyfish_row(),
         computer_row(),
@@ -1032,7 +1057,8 @@ class SarvamKeyRequest(BaseModel):
 
 # ---------------------------------------------------------------- keys saved from Settings → Keys
 
-KEYS_FROM_SETTINGS = {"tinyfish": "tinyfish_api_key", "calcom": "calcom_api_key", "tavily": "tavily_api_key", "groq": "groq_api_key"}
+KEYS_FROM_SETTINGS = {"tinyfish": "tinyfish_api_key", "calcom": "calcom_api_key", "tavily": "tavily_api_key",
+                      "groq": "groq_api_key", "github": "github_token"}
 
 
 class KeyRequest(BaseModel):
@@ -1044,6 +1070,23 @@ async def keys_status():
     """Which optional keys are saved (never the keys themselves), and whether your keys file was found."""
     return {"keys": {k: bool(get_secret(v)) for k, v in KEYS_FROM_SETTINGS.items()},
             "file": await asyncio.to_thread(keyfile.status)}
+
+
+async def _check_github(key: str) -> None:
+    """Prove a GitHub token works, and that it is a token rather than a pasted URL or password."""
+    if not key.startswith(("ghp_", "github_pat_", "gho_", "ghs_")):
+        raise ProviderError("A GitHub token starts with ghp_ or github_pat_ (github.com \u2192 Settings \u2192 "
+                            "Developer settings \u2192 Personal access tokens).", "bad_key")
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as http:
+        try:
+            r = await http.get("https://api.github.com/user", headers={"Authorization": f"Bearer {key}",
+                                                                      "User-Agent": "PLAG"})
+        except httpx.HTTPError as e:
+            raise ProviderError("GitHub can't be reached right now. Check the internet and try again.", "offline") from e
+    if r.status_code in (401, 403):
+        raise ProviderError("GitHub didn't accept that token. Make a new one and copy it again.", "bad_key")
+    if r.status_code != 200:
+        raise ProviderError(f"GitHub answered with an error ({r.status_code}). Try again in a minute.", str(r.status_code))
 
 
 @app.post("/v1/keys/{service}")
@@ -1064,6 +1107,8 @@ async def keys_save(service: str, req: KeyRequest):
             await groq.check_key(key)
         elif service == "tavily":
             await websearch.check_key(key)
+        elif service == "github":
+            await _check_github(key)
     except (TinyFishError, CalError, ProviderError) as e:
         return JSONResponse({"error": str(e.code), "message": str(e)}, status_code=422)
     await asyncio.to_thread(set_secret, name, key)
@@ -1573,6 +1618,193 @@ async def listen(ws: WebSocket):
         log.info("realtime hearing session %.1f s", loop.time() - started)
         with contextlib.suppress(Exception):
             await ws.close()
+
+
+# ---------------------------------------------------------------- email (real IMAP + SMTP: mail.py)
+
+class MailAccount(BaseModel):
+    address: str = Field(min_length=5, max_length=200)
+    password: str = Field(min_length=4, max_length=300)   # an app password, never the account's own password
+    imap: str = Field(default="", max_length=200)
+    smtp: str = Field(default="", max_length=200)
+    name: str = Field(default="", max_length=80)
+
+
+@app.get("/v1/mail")
+async def mail_status():
+    """Whether an email account is connected, and which. Never the password."""
+    return await asyncio.to_thread(mail.status)
+
+
+@app.post("/v1/mail")
+async def mail_connect(req: MailAccount):
+    """Sign in to the mail server before saving anything: a wrong app password must fail here, not silently later."""
+    had = await asyncio.to_thread(mail.status)
+    await asyncio.to_thread(mail.save, req.address, req.password, imap=req.imap, smtp=req.smtp, name=req.name)
+    try:
+        checked = await mail.check()
+    except mail.MailError as e:
+        await asyncio.to_thread(mail.forget)  # don't leave a broken account saved
+        if had.get("connected"):
+            log.info("the new mail account failed, and the old one was replaced: %s", e.code)
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+    audit("mail.connected")
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"ok": True, **checked, **await asyncio.to_thread(mail.status)}
+
+
+@app.delete("/v1/mail")
+async def mail_disconnect():
+    await asyncio.to_thread(mail.forget)
+    audit("mail.disconnected")
+    bus.publish("connectors", await asyncio.to_thread(connectors))
+    return {"ok": True}
+
+
+@app.get("/v1/mail/unread")
+async def mail_unread_list(limit: int = 10):
+    try:
+        items = await mail.unread(limit)
+    except mail.MailError as e:
+        return JSONResponse({"error": e.code, "message": str(e)}, status_code=422)
+    return {"messages": [{k: m[k] for k in ("uid", "from", "from_name", "subject", "date")} for m in items]}
+
+
+@app.get("/v1/mail/servers")
+async def mail_servers(address: str = ""):
+    """What PLAG will use for this address, so Settings can show it before you connect."""
+    known = await asyncio.to_thread(mail.servers_for, address)
+    return {"known": bool(known), "imap": known[0] if known else "", "smtp": known[1] if known else ""}
+
+
+# ---------------------------------------------------------------- agents (the Agents tab)
+
+class AgentBody(BaseModel):
+    name: str = Field(default="", max_length=60)
+    purpose: str = Field(default="", max_length=400)
+    instructions: str = Field(default="", max_length=4000)
+    brain: str = Field(default="glm", max_length=20)
+    tools: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class AgentTask(BaseModel):
+    task: str = Field(min_length=1, max_length=1000)
+
+
+class AgentIdea(BaseModel):
+    description: str = Field(min_length=3, max_length=600)
+
+
+def _agent_error(e: Exception) -> JSONResponse:
+    code = getattr(e, "code", "agent")
+    return JSONResponse({"error": str(code), "message": str(e)},
+                        status_code=404 if code in ("no_agent", "no_run") else 422)
+
+
+@app.get("/v1/agents")
+async def agents_list():
+    """Every agent, the brains that have a key, and the full tool catalogue for the editor."""
+    return {"agents": [a.as_dict() for a in await asyncio.to_thread(agents.all_agents)],
+            "brains": await asyncio.to_thread(agents.available_brains),
+            "tools": agenttools.as_catalogue(),
+            "mail": await asyncio.to_thread(mail.status)}
+
+
+@app.post("/v1/agents")
+async def agents_create(req: AgentBody):
+    try:
+        a = await asyncio.to_thread(lambda: agents.create(
+            name=req.name, purpose=req.purpose, instructions=req.instructions, brain=req.brain, tools=req.tools))
+    except agents.AgentError as e:
+        return _agent_error(e)
+    return a.as_dict()
+
+
+@app.post("/v1/agents/build")
+async def agents_build(req: AgentIdea):
+    """"Make me an agent that…" — Muse designs it, picking from the real tool list, and it's saved ready to run."""
+    try:
+        a = await agents.build(req.description)
+    except (agents.AgentError, ProviderError) as e:
+        return _agent_error(e)
+    return a.as_dict()
+
+
+@app.patch("/v1/agents/{agent_id}")
+async def agents_update(agent_id: str, req: AgentBody):
+    try:
+        a = await asyncio.to_thread(lambda: agents.update(
+            agent_id, name=req.name, purpose=req.purpose, instructions=req.instructions,
+            brain=req.brain, tools=req.tools, enabled=req.enabled))
+    except agents.AgentError as e:
+        return _agent_error(e)
+    return a.as_dict()
+
+
+@app.delete("/v1/agents/{agent_id}")
+async def agents_delete(agent_id: str):
+    try:
+        gone = await asyncio.to_thread(agents.remove, agent_id)
+    except agents.AgentError as e:
+        return _agent_error(e)
+    return {"ok": gone}
+
+
+_agent_runs: dict[str, asyncio.Task] = {}
+
+
+def _forget_run(run_id: str, task: asyncio.Task) -> None:
+    _agent_runs.pop(run_id, None)
+    if not task.cancelled() and task.exception() is not None:
+        log.error("agent run %s failed", run_id, exc_info=task.exception())
+
+
+@app.post("/v1/agents/{agent_id}/run")
+async def agents_run(agent_id: str, req: AgentTask):
+    """Start the agent and return at once: its steps arrive on the event bus as it works."""
+    a = await asyncio.to_thread(agents.get, agent_id)
+    if a is None:
+        return JSONResponse({"error": "no_agent", "message": "That agent doesn't exist."}, status_code=404)
+    if not a.enabled:
+        return JSONResponse({"error": "disabled", "message": f"{a.name} is switched off."}, status_code=422)
+    if not a.tools:
+        return JSONResponse({"error": "no_tools", "message": f"{a.name} has no tools yet."}, status_code=422)
+    run_id = await asyncio.to_thread(agents.start_run, a, req.task)
+    task = asyncio.create_task(agents.run(a, req.task, run_id=run_id))
+    _agent_runs[run_id] = task
+    task.add_done_callback(lambda t: _forget_run(run_id, t))
+    return {"run_id": run_id, "agent_id": a.id, "state": "running"}
+
+
+@app.post("/v1/agents/runs/{run_id}/stop")
+async def agents_stop(run_id: str):
+    task = _agent_runs.get(run_id)
+    if task and not task.done():
+        task.cancel()
+    return {"ok": True}
+
+
+@app.post("/v1/agents/runs/{run_id}/approve")
+async def agents_approve(run_id: str, yes: bool = True):
+    """Your answer to an agent's approval card. On yes the held-back step runs and the agent carries on."""
+    try:
+        return await agents.approve(run_id, yes)
+    except agents.AgentError as e:
+        return _agent_error(e)
+
+
+@app.get("/v1/agents/runs")
+async def agents_runs(agent_id: str = "", limit: int = 20):
+    return {"runs": await asyncio.to_thread(agents.runs, agent_id, max(1, min(limit, 50)))}
+
+
+@app.get("/v1/agents/runs/{run_id}")
+async def agents_run_get(run_id: str):
+    row = await asyncio.to_thread(agents.run_get, run_id)
+    if row is None:
+        return JSONResponse({"error": "no_run"}, status_code=404)
+    return row
 
 
 @app.websocket("/ws")

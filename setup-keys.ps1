@@ -23,6 +23,9 @@ $fields = [ordered]@{
   'tavily'         = 'Tavily web search  (optional)    app.tavily.com'
   'tinyfish'       = 'TinyFish web agent (optional)    tinyfish.ai'
   'calcom'         = 'Cal.com calendar   (optional)    cal.com -> Settings -> Security'
+  'github'         = 'GitHub token (CodeRabbit agent) github.com -> Settings -> Developer settings'
+  'email'          = 'Your email address (Inbox agent)  e.g. you@gmail.com'
+  'mail_password'  = 'That mailbox app password        myaccount.google.com/apppasswords'
 }
 
 $existing = @{}
